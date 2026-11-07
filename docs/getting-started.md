@@ -1,7 +1,8 @@
 # Getting started
 
-QuidsIn is a monorepo managed with npm workspaces. This covers Phase 1 — the
-foundation scaffold — not any financial features yet.
+QuidsIn is a monorepo managed with npm workspaces. This covers Phase 1
+(foundation) and Phase 2 (core financial functionality): authentication,
+income, recurring expenses, accounts, and the dashboard.
 
 ## Prerequisites
 
@@ -18,14 +19,23 @@ docker compose -f deploy/docker/docker-compose.yml up
 
 Once all services report healthy (`docker compose -f deploy/docker/docker-compose.yml ps`):
 
-- Web: http://localhost:5173
+- Web: http://localhost:5173 — register an account, then add income,
+  recurring expenses, and accounts from the navigation.
 - API health: http://localhost:3001/health
 - API readiness (checks DynamoDB): http://localhost:3001/health/ready
 - DynamoDB Local: http://localhost:8000
 
 DynamoDB Local's data persists in the named volume `dynamodb-data` across
 restarts (`docker compose ... down` without `-v` keeps it; `down -v` deletes
-it).
+it). The application table and its index are created automatically on API
+startup if they don't already exist.
+
+### Password resets in local/self-hosted use
+
+By default (`NOTIFIER_DRIVER=console`), a password reset doesn't send a
+real email — the reset link is logged to the API's console output
+(`docker compose logs api`). To send real emails, set `NOTIFIER_DRIVER=smtp`
+and the `SMTP_*` variables (see `.env.example`).
 
 ### Known limitation of DynamoDB Local
 

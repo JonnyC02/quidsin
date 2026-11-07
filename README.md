@@ -10,11 +10,11 @@ self-host QuidsIn.
 
 ## Status
 
-This repository currently contains **Phase 1 — Foundation**: the monorepo
-scaffold, shared tooling, and a thin vertical slice (web → api → worker →
-DynamoDB Local) proving the stack boots and talks to itself via health
-checks. No financial features exist yet. See `IMPLEMENTATION_STATUS.md` for
-the current phase and what's planned next.
+This repository currently contains **Phase 1 (Foundation)** and **Phase 2
+(Core Financial Functionality)**: authentication, income sources, recurring
+expenses, manual accounts, and the dashboard. Bank connections, multi-user
+tenants, AWS deployment, and CI/CD are not implemented yet. See
+`IMPLEMENTATION_STATUS.md` for the current phase and what's planned next.
 
 ## Repository layout
 

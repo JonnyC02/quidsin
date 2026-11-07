@@ -1,0 +1,58 @@
+export const GSI1_NAME = 'GSI1';
+
+export interface PrimaryKey {
+  pk: string;
+  sk: string;
+}
+
+export interface Gsi1Key {
+  gsi1pk: string;
+  gsi1sk: string;
+}
+
+export const keys = {
+  user: (id: string): PrimaryKey => ({ pk: `USER#${id}`, sk: `USER#${id}` }),
+  emailLock: (email: string): PrimaryKey => ({ pk: `EMAIL#${email}`, sk: `EMAIL#${email}` }),
+  tenant: (id: string): PrimaryKey => ({ pk: `TENANT#${id}`, sk: `TENANT#${id}` }),
+  session: (id: string): PrimaryKey => ({ pk: `SESSION#${id}`, sk: `SESSION#${id}` }),
+  passwordResetToken: (tokenHash: string): PrimaryKey => ({
+    pk: `RESET#${tokenHash}`,
+    sk: `RESET#${tokenHash}`,
+  }),
+  income: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `INCOME#${id}`,
+  }),
+  expense: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `EXPENSE#${id}`,
+  }),
+  account: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `ACCOUNT#${id}`,
+  }),
+  tenantPrefix: (tenantId: string): string => `TENANT#${tenantId}`,
+} as const;
+
+export const gsi1 = {
+  sessionByUser: (userId: string, sessionId: string): Gsi1Key => ({
+    gsi1pk: `USER#${userId}`,
+    gsi1sk: `SESSION#${sessionId}`,
+  }),
+  resetTokenByUser: (userId: string, tokenId: string): Gsi1Key => ({
+    gsi1pk: `USER#${userId}`,
+    gsi1sk: `RESET#${tokenId}`,
+  }),
+  userPrefix: (userId: string): string => `USER#${userId}`,
+} as const;
+
+/** Internal DynamoDB item attributes that must never leak into a domain entity. */
+export const INTERNAL_ATTRIBUTES = ['pk', 'sk', 'gsi1pk', 'gsi1sk', 'entityType', 'ttl'] as const;
+
+export function stripInternalAttributes<T>(item: Record<string, unknown>): T {
+  const clean: Record<string, unknown> = { ...item };
+  for (const attribute of INTERNAL_ATTRIBUTES) {
+    delete clean[attribute];
+  }
+  return clean as T;
+}

@@ -15,9 +15,10 @@ COPY apps/web/package.json apps/web/
 RUN npm ci
 
 COPY packages/shared packages/shared
+COPY packages/core packages/core
 COPY apps/web apps/web
 
-RUN npx tsc -b packages/shared
+RUN npx tsc -b packages/shared packages/core --force
 
 WORKDIR /repo/apps/web
 EXPOSE 5173

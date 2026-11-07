@@ -28,4 +28,36 @@ describe('loadConfig', () => {
   it('throws when a value is invalid', () => {
     expect(() => loadConfig({ ...validEnv, DYNAMODB_ENDPOINT: 'not-a-url' })).toThrow();
   });
+
+  it('defaults the notifier to console and does not require SMTP vars', () => {
+    const config = loadConfig(validEnv);
+    expect(config.NOTIFIER_DRIVER).toBe('console');
+  });
+
+  it('requires SMTP vars when NOTIFIER_DRIVER=smtp', () => {
+    expect(() => loadConfig({ ...validEnv, NOTIFIER_DRIVER: 'smtp' })).toThrow(/SMTP_HOST/);
+  });
+
+  it('accepts NOTIFIER_DRIVER=smtp when all SMTP vars are present', () => {
+    const config = loadConfig({
+      ...validEnv,
+      NOTIFIER_DRIVER: 'smtp',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '587',
+      SMTP_USER: 'user',
+      SMTP_PASSWORD: 'pass',
+      SMTP_FROM_ADDRESS: 'noreply@example.com',
+    });
+
+    expect(config.SMTP_HOST).toBe('smtp.example.com');
+    expect(config.SMTP_PORT).toBe(587);
+  });
+
+  it('parses boolean-string env vars correctly, including the false case', () => {
+    const config = loadConfig({ ...validEnv, SESSION_COOKIE_SECURE: 'false' });
+    expect(config.SESSION_COOKIE_SECURE).toBe(false);
+
+    const configTrue = loadConfig({ ...validEnv, SESSION_COOKIE_SECURE: 'true' });
+    expect(configTrue.SESSION_COOKIE_SECURE).toBe(true);
+  });
 });

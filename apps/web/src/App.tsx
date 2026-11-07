@@ -1,49 +1,44 @@
-import { useEffect, useState } from 'react';
-import type { HealthStatus } from '@quidsin/shared';
-import { getHealth } from './lib/api';
-import './App.css';
-
-type LoadState =
-  | { kind: 'loading' }
-  | { kind: 'loaded'; health: HealthStatus }
-  | { kind: 'error'; message: string };
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { ProtectedRoute } from './routes/ProtectedRoute.js';
+import { PublicOnlyRoute } from './routes/PublicOnlyRoute.js';
+import { AppShell } from './components/AppShell.js';
+import { PublicShell } from './components/PublicShell.js';
+import { LoginPage } from './pages/LoginPage.js';
+import { RegisterPage } from './pages/RegisterPage.js';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
+import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
+import { OverviewPage } from './pages/OverviewPage.js';
+import { IncomePage } from './pages/IncomePage.js';
+import { ExpensesPage } from './pages/ExpensesPage.js';
+import { AccountsPage } from './pages/AccountsPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
 
 function App() {
-  const [state, setState] = useState<LoadState>({ kind: 'loading' });
-
-  useEffect(() => {
-    getHealth()
-      .then((health) => setState({ kind: 'loaded', health }))
-      .catch((error: unknown) =>
-        setState({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Unknown error',
-        }),
-      );
-  }, []);
-
   return (
-    <main className="app">
-      <h1>QuidsIn</h1>
-      <p>Phase 1 foundation check: web &rarr; api &rarr; DynamoDB Local.</p>
+    <Routes>
+      <Route path="/" element={<Navigate to="/overview" replace />} />
 
-      {state.kind === 'loading' && <p>Checking API status&hellip;</p>}
+      <Route element={<PublicOnlyRoute />}>
+        <Route element={<PublicShell />}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+        </Route>
+      </Route>
 
-      {state.kind === 'loaded' && (
-        <div className="status status--ok">
-          <strong>API status: {state.health.status}</strong>
-          <p>Uptime: {state.health.uptimeSeconds.toFixed(1)}s</p>
-          <p>As of: {state.health.timestamp}</p>
-        </div>
-      )}
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AppShell />}>
+          <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/income" element={<IncomePage />} />
+          <Route path="/expenses" element={<ExpensesPage />} />
+          <Route path="/accounts" element={<AccountsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
+      </Route>
 
-      {state.kind === 'error' && (
-        <div className="status status--error">
-          <strong>Could not reach the API</strong>
-          <p>{state.message}</p>
-        </div>
-      )}
-    </main>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 

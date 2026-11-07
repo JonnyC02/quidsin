@@ -1,0 +1,81 @@
+name: quidsin
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.3.2
+    user: root
+    command: ['-jar', 'DynamoDBLocal.jar', '-sharedDb', '-dbPath', '/home/dynamodblocal/data']
+    ports:
+      - '8000:8000'
+    volumes:
+      - dynamodb-data:/home/dynamodblocal/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -s -o /dev/null http://localhost:8000 || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      NODE_ENV: development
+      PORT: '3001'
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      DYNAMODB_REGION: local
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3001/health || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: development
+      WORKER_PORT: '3002'
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      DYNAMODB_REGION: local
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    depends_on:
+      dynamodb-local:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3002/health || exit 1']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '5173:5173'
+    environment:
+      # Browser-reachable URL, NOT the Docker-internal service name "api" —
+      # the browser runs on the host, not inside the compose network.
+      VITE_API_BASE_URL: http://localhost:3001
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  dynamodb-data: {}

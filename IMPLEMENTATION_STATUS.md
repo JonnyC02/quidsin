@@ -126,6 +126,22 @@ console notifier → delete account → re-register with the same email
   backend-only code (`AuthService`, `sha256Hex`, etc.) is actually present
   in the output — tree-shaking correctly drops it; the warning is just a
   resolution-phase scan artifact, not a sign of bundled dead code.
+- **The web dev server 500'd on every real (non-type-only) import from
+  `@quidsin/core`/`@quidsin/shared`, only visible once an actual browser
+  loaded the page** (a curl spot-check of the importing file's own
+  transform doesn't trigger transformation of the imported module, so
+  this went undetected until Playwright MCP was wired up and used to
+  click through the app). Cause: `@quidsin/*` are npm-workspace symlinks;
+  Vite's default `resolve.preserveSymlinks: false` resolves them to their
+  real path under `packages/*` and then treats the already-built
+  `dist/*.js` as project _source_ rather than a dependency, running it
+  through the TS-aware `vite:oxc` transform. That transform does a
+  tsconfig lookup, finds `packages/{core,shared}/tsconfig.json` right next
+  to the `dist/` folder, but that tsconfig's `include: ["src"]` doesn't
+  cover `dist/`, so resolution falls through to unrelated project-reference
+  entries in the root `tsconfig.json` and fails. Fixed by setting
+  `resolve.preserveSymlinks: true` in `apps/web/vite.config.ts`, which
+  keeps Vite treating workspace packages as ordinary dependencies.
 
 ## Architectural decisions
 

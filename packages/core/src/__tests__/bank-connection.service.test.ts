@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { BankConnectionService, NotFoundError } from '../index.js';
+import { BankConnectionService, ForbiddenError, NotFoundError } from '../index.js';
 import {
   FakeBankingProvider,
+  FakeEntitlementChecker,
   FixedClock,
   InMemoryAccountRepository,
   InMemoryEncryptionService,
@@ -19,6 +20,7 @@ function buildService() {
   const accountRepository = new InMemoryAccountRepository();
   const jobQueue = new InMemoryJobQueue();
   const encryptionService = new InMemoryEncryptionService();
+  const entitlementChecker = new FakeEntitlementChecker();
   const clock = new FixedClock(new Date('2026-01-01T00:00:00.000Z'));
 
   const service = new BankConnectionService({
@@ -27,12 +29,20 @@ function buildService() {
     accountRepository,
     jobQueue,
     encryptionService,
+    entitlementChecker,
     clock,
     idGenerator: new SequentialIdGenerator(),
     config: {},
   });
 
-  return { service, bankingProvider, plaidItemRepository, accountRepository, jobQueue };
+  return {
+    service,
+    bankingProvider,
+    plaidItemRepository,
+    accountRepository,
+    jobQueue,
+    entitlementChecker,
+  };
 }
 
 describe('BankConnectionService', () => {
@@ -117,5 +127,26 @@ describe('BankConnectionService', () => {
 
     const claimed = await ctx.jobQueue.claimNext('worker-1', 60_000);
     expect(claimed).toMatchObject({ plaidItemId: 'item-1' });
+  });
+
+  it('a tenant without the bank_connections entitlement cannot create a link token or exchange a public token', async () => {
+    ctx.entitlementChecker.setAllowed(false);
+
+    await expect(ctx.service.createLinkToken(ctxA)).rejects.toThrow(ForbiddenError);
+    await expect(ctx.service.exchangePublicToken(ctxA, 'pub-tok')).rejects.toThrow(ForbiddenError);
+  });
+
+  it('disconnecting and syncing an existing connection still work once the entitlement is revoked', async () => {
+    await ctx.service.exchangePublicToken(ctxA, 'pub-tok');
+    await ctx.jobQueue.claimNext('worker-1', 60_000);
+    await ctx.jobQueue.complete('item-1');
+
+    ctx.entitlementChecker.setAllowed(false);
+
+    await ctx.service.triggerSync(ctxA, 'item-1');
+    await ctx.service.disconnectItem(ctxA, 'item-1');
+
+    const item = await ctx.plaidItemRepository.getById(ctxA.tenantId, 'item-1');
+    expect(item?.status).toBe('disconnected');
   });
 });

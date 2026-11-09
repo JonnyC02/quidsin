@@ -2,6 +2,7 @@ import type { Express } from 'express';
 import type { HealthCheckable } from '@quidsin/database';
 import {
   AccountService,
+  AllowAllEntitlementChecker,
   AuthService,
   BankConnectionService,
   DashboardService,
@@ -102,6 +103,7 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
     bankingProvider,
     plaidItemRepository,
     accountRepository,
+    entitlementChecker: new AllowAllEntitlementChecker(),
     jobQueue,
     encryptionService,
     clock,

@@ -3,11 +3,12 @@ import type { PlaidItem } from '../domain/entities/plaid-item.js';
 import type { AccountRepository } from '../ports/account-repository.js';
 import type { BankingProvider } from '../ports/banking-provider.js';
 import type { EncryptionService } from '../ports/encryption-service.js';
+import type { EntitlementChecker } from '../ports/entitlement-checker.js';
 import type { JobQueue } from '../ports/job-queue.js';
 import type { PlaidItemRepository } from '../ports/plaid-item-repository.js';
 import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
-import { NotFoundError } from '../domain/errors.js';
+import { ForbiddenError, NotFoundError } from '../domain/errors.js';
 import type { AuthContext } from './auth-context.js';
 
 export interface BankConnectionServiceConfig {
@@ -21,6 +22,7 @@ export interface BankConnectionServiceDeps {
   accountRepository: AccountRepository;
   jobQueue: JobQueue;
   encryptionService: EncryptionService;
+  entitlementChecker: EntitlementChecker;
   clock: Clock;
   idGenerator: IdGenerator;
   config: BankConnectionServiceConfig;
@@ -44,6 +46,8 @@ export class BankConnectionService {
   constructor(private readonly deps: BankConnectionServiceDeps) {}
 
   async createLinkToken(ctx: AuthContext): Promise<{ linkToken: string }> {
+    await this.requireBankConnectionsEntitlement(ctx);
+
     return this.deps.bankingProvider.createLinkToken({
       userId: ctx.userId,
       webhookUrl: this.deps.config.webhookUrl,
@@ -51,6 +55,8 @@ export class BankConnectionService {
   }
 
   async exchangePublicToken(ctx: AuthContext, publicToken: string): Promise<{ accounts: Account[] }> {
+    await this.requireBankConnectionsEntitlement(ctx);
+
     const exchange = await this.deps.bankingProvider.exchangePublicToken(publicToken);
     const encryptedAccessToken = await this.deps.encryptionService.encrypt(exchange.accessToken);
     const now = this.deps.clock.now().toISOString();
@@ -118,6 +124,19 @@ export class BankConnectionService {
   async triggerSync(ctx: AuthContext, plaidItemId: string): Promise<void> {
     await this.getOwnedItem(ctx, plaidItemId);
     await this.deps.jobQueue.enqueueSync({ tenantId: ctx.tenantId, plaidItemId });
+  }
+
+  /**
+   * Only gates *creating* a new connection. A tenant whose subscription
+   * lapses keeps existing connections syncing and can still disconnect
+   * them — breaking something already running on a lapsed subscription
+   * would be a worse outcome than just blocking new connections.
+   */
+  private async requireBankConnectionsEntitlement(ctx: AuthContext): Promise<void> {
+    const allowed = await this.deps.entitlementChecker.canUseFeature(ctx.tenantId, 'bank_connections');
+    if (!allowed) {
+      throw new ForbiddenError('Bank connections require an active subscription.');
+    }
   }
 
   private async getOwnedItem(ctx: AuthContext, plaidItemId: string): Promise<PlaidItem> {

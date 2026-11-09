@@ -2,10 +2,12 @@
 
 ## Current phase
 
-**Phase 6 — Public CI/CD and Demo Environment: complete.** Authentication
-was replaced with Google Sign-In between Phase 2 and Phase 3 (see
-"Authentication replaced with Google Sign-In" below) — this superseded
-Phase 2's original password-based auth before Phase 3 began.
+**Phase 7 (Part A) — the Community Edition's half of the private hosted
+edition hook: complete.** The private `quidsin-hosted` repo (Part B) is
+tracked there, not here. Authentication was replaced with Google Sign-In
+between Phase 2 and Phase 3 (see "Authentication replaced with Google
+Sign-In" below) — this superseded Phase 2's original password-based auth
+before Phase 3 began.
 
 ## Completed functionality
 
@@ -273,6 +275,42 @@ PR running `verify`, a real merge running `deploy-demo`, the OIDC role
 assumption actually succeeding — needs the user's own GitHub repo and
 AWS account and is left for them, per `docs/ci-cd.md`.
 
+### Phase 7 (Part A) — Private Hosted Edition: the Community Edition's hook
+
+A second, commercial product — a privately-hosted, subscription-gated
+edition, in its own private repository (`quidsin-hosted`, tracked
+there, not in this repo) — is being built on top of this one. This
+repo's only role in it is exposing one small, additive extensibility
+seam; nothing else about the Community Edition changes.
+
+- **New `EntitlementChecker` port** (`packages/core/src/ports/entitlement-checker.ts`):
+  `canUseFeature(tenantId, feature)`, plus a trivial
+  `AllowAllEntitlementChecker` default — the *only* implementation the
+  Community Edition ever uses, co-located with the port the same way
+  `Clock`/`SystemClock` and `IdGenerator`/`RandomUuidGenerator` already
+  are.
+- **`BankConnectionService.createLinkToken`/`exchangePublicToken` now
+  check it first**, throwing `ForbiddenError` if not entitled.
+  `disconnectItem`/`triggerSync` are deliberately **not** gated — a
+  tenant whose entitlement lapses keeps existing connections syncing
+  and can still disconnect them; only *creating* a new connection is
+  blocked. Breaking something already running would be a worse outcome
+  than just blocking new connections.
+- **`buildApiApp` accepts an optional `entitlementChecker` override**,
+  defaulting to `AllowAllEntitlementChecker` when omitted. This is the
+  one seam the private repo's own Lambda entrypoint uses to inject a
+  real Stripe-backed implementation while reusing every other line of
+  the Community Edition's wiring unchanged — it never needs to fork or
+  duplicate `buildApiApp`, `BankConnectionService`, or anything else.
+
+Verified: full `packages/core`/`apps/api` test suites green (175 tests
+total, +2 for the new entitlement-gating cases), typecheck, lint — this
+change is indistinguishable from any other small port addition in terms
+of risk, and proves zero behavior change for every self-hoster (every
+existing test implicitly exercises the allow-all default and still
+passes unchanged). The private repo's billing/admin/Stripe work (Part B)
+is tracked in `quidsin-hosted`'s own `IMPLEMENTATION_STATUS.md`, not here.
+
 ## Authentication replaced with Google Sign-In
 
 Shortly after Phase 2 shipped, authentication was replaced entirely —
@@ -320,7 +358,10 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 7** — private hosted edition (separate repository).
+- **Phase 7 (Part B)** — the private `quidsin-hosted` repo itself:
+  billing data model, Stripe checkout/portal/webhook, the minimal admin
+  app, and a deployment for all of it. Part A (this repo's
+  `EntitlementChecker` hook) is complete; see above.
 - **Phase 8** — cross-repository automation.
 
 ## Known issues / things discovered during implementation
@@ -661,3 +702,31 @@ One further choice made without needing a question:
   maintenance burden relative to the security benefit, given the trust
   policy is already the real access boundary. Documented here as a
   stated trade-off rather than a silent gap.
+
+### Phase 7 (Part A)
+
+Of the four design questions resolved with the user for the hosted
+edition as a whole, one directly shaped this repo:
+
+- **One small, additive port, not a private fork of gated logic.** The
+  alternative — the private repo duplicating `BankConnectionService` (or
+  whatever needed a paywall check) entirely, so the public repo never
+  depends on or knows about billing — was rejected because it trades a
+  few lines of public-repo surface area for an ongoing drift risk: two
+  copies of the same connection-creation logic that could silently
+  diverge. A port with an always-allow default costs the Community
+  Edition nothing (the test suite proves this directly) and gives the
+  private repo one real extensibility seam instead of a maintenance
+  liability.
+- **Only `createLinkToken`/`exchangePublicToken` are gated, not
+  `disconnectItem`/`triggerSync`.** Decided without needing a question —
+  gating *creating new access* is the natural commercial boundary;
+  breaking a connection someone already has, the moment a subscription
+  lapses, is a strictly worse experience for no corresponding benefit to
+  the operator, since the data (and the sync cost) already exists
+  either way until they disconnect it themselves.
+
+The other three resolutions (Stripe Checkout/Portal over custom billing
+UI, the paywall boundary being Plaid specifically, and the admin app's
+minimal scope) belong entirely to the private repo's own implementation
+and are recorded in `quidsin-hosted`'s own `IMPLEMENTATION_STATUS.md`.

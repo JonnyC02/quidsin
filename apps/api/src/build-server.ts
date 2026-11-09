@@ -19,9 +19,11 @@ import {
 import {
   AccountService,
   AesGcmEncryptionService,
+  AllowAllEntitlementChecker,
   AuthService,
   BankConnectionService,
   DashboardService,
+  type EntitlementChecker,
   ExpenseService,
   IncomeService,
   PlaidWebhookService,
@@ -38,6 +40,13 @@ import { GoogleAuthLibraryIdentityVerifier } from './infra/google-identity-verif
 export interface BuildApiAppDeps {
   database: HealthCheckable;
   dynamoClient: DynamoDBClient;
+  /**
+   * Defaults to AllowAllEntitlementChecker (the Community Edition's only
+   * behavior) when omitted. The one seam a private hosted deployment
+   * uses to inject a real billing-backed implementation without
+   * touching anything else this function wires up.
+   */
+  entitlementChecker?: EntitlementChecker;
 }
 
 /**
@@ -118,6 +127,7 @@ export async function buildApiApp(config: Config, deps: BuildApiAppDeps): Promis
     accountRepository,
     jobQueue,
     encryptionService,
+    entitlementChecker: deps.entitlementChecker ?? new AllowAllEntitlementChecker(),
     clock,
     idGenerator,
     config: {

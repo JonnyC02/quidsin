@@ -63,6 +63,11 @@ export type {
   SyncPage,
 } from './ports/banking-provider.js';
 export { type EncryptionService, AesGcmEncryptionService } from './ports/encryption-service.js';
+export {
+  type EntitlementChecker,
+  type GatedFeature,
+  AllowAllEntitlementChecker,
+} from './ports/entitlement-checker.js';
 export type { JobQueue, SyncJob } from './ports/job-queue.js';
 export type { PlaidItemRepository, NewPlaidItem } from './ports/plaid-item-repository.js';
 export type {

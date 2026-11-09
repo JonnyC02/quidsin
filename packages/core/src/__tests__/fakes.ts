@@ -8,7 +8,9 @@ import type {
   Clock,
   EncryptedPayload,
   EncryptionService,
+  EntitlementChecker,
   ExchangeResult,
+  GatedFeature,
   GoogleIdentity,
   GoogleIdentityVerifier,
   GoogleProfile,
@@ -687,5 +689,18 @@ export class InMemoryTenantRepository implements TenantRepository {
 
   async findById(id: string): Promise<Tenant | null> {
     return this.tenantsById.get(id) ?? null;
+  }
+}
+
+/** Defaults to allow-all, matching the Community Edition's real default — flip with setAllowed to test a gated feature. */
+export class FakeEntitlementChecker implements EntitlementChecker {
+  private allowed = true;
+
+  setAllowed(allowed: boolean): void {
+    this.allowed = allowed;
+  }
+
+  async canUseFeature(_tenantId: string, _feature: GatedFeature): Promise<boolean> {
+    return this.allowed;
   }
 }

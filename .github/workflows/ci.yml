@@ -1,0 +1,112 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:3.3.2
+        ports:
+          - 8000:8000
+        # 2.5.3 and older hang indefinitely on requests from current AWS
+        # SDK v3 clients — see IMPLEMENTATION_STATUS.md (Phase 1). Pinned
+        # to 3.3.2 like everywhere else this image is used.
+        options: >-
+          --health-cmd "curl -s -o /dev/null http://localhost:8000 || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+    env:
+      DYNAMODB_ENDPOINT: http://localhost:8000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+      - uses: aws-actions/setup-sam@v2
+
+      # No AWS credentials here — both commands are local-only checks.
+      - name: Validate and build the SAM template
+        run: |
+          export PATH="$(pwd)/node_modules/.bin:$PATH"
+          cd deploy/aws
+          sam validate --lint
+          sam build
+
+  deploy-demo:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC — no long-lived AWS credentials are stored anywhere
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - uses: aws-actions/setup-sam@v2
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy the API/worker/table stack
+        run: |
+          export PATH="$(pwd)/node_modules/.bin:$PATH"
+          cd deploy/aws
+          sam build
+          sam deploy \
+            --stack-name quidsin-demo \
+            --resolve-s3 \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides Stage=demo \
+            --region "${{ vars.AWS_REGION }}"
+
+      - name: Read stack outputs
+        id: stack
+        run: |
+          OUTPUTS=$(aws cloudformation describe-stacks --stack-name quidsin-demo --query 'Stacks[0].Outputs' --output json)
+          echo "api_url=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="ApiUrl") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "web_bucket=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="WebBucketName") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "web_distribution_id=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="WebDistributionId") | .OutputValue')" >> "$GITHUB_OUTPUT"
+
+      # No Plaid/encryption secrets anywhere in this workflow — those
+      # stay exactly where Phase 5 put them (SSM, fetched by the Lambda
+      # itself at runtime). Only the public Google Client ID passes
+      # through here, same as it's already safe to embed in the bundle.
+      - name: Build and deploy the web app
+        env:
+          VITE_API_BASE_URL: ${{ steps.stack.outputs.api_url }}
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+          WEB_BUCKET_NAME: ${{ steps.stack.outputs.web_bucket }}
+          WEB_DISTRIBUTION_ID: ${{ steps.stack.outputs.web_distribution_id }}
+        run: ./deploy/aws/deploy-web.sh

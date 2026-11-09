@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  One-time bootstrap for Phase 6's CI/CD: a GitHub Actions OIDC identity
+  provider and a deploy role scoped to this exact repo's main branch.
+  Deployed once by hand (plain CloudFormation, not SAM — there's no app
+  here) — never touched by the CI/CD pipeline itself. See docs/ci-cd.md.
+
+Parameters:
+  GitHubOrgAndRepo:
+    Type: String
+    Default: JonnyC02/quidsin
+    Description: '"org/repo" — the deploy role will only be assumable by workflow runs against this repo''s main branch.'
+  CreateOidcProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >
+      Set to false if this AWS account already has a GitHub OIDC
+      provider (an account can only have one) — e.g. from another
+      project — and supply its ARN via ExistingOidcProviderArn instead.
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ''
+    Description: Only used when CreateOidcProvider is false.
+
+Conditions:
+  ShouldCreateOidcProvider: !Equals [!Ref CreateOidcProvider, 'true']
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # No ThumbprintList: AWS no longer requires or validates against a
+      # pinned certificate thumbprint for this resource — GitHub's OIDC
+      # provider is trusted via its TLS certificate chain instead.
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: quidsin-github-actions-deploy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated:
+                !If
+                  - ShouldCreateOidcProvider
+                  - !Ref GitHubOidcProvider
+                  - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Only workflow runs against this repo's main branch —
+                # never a fork's PR, never any other branch.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrgAndRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: quidsin-demo-deploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Broad-but-named, Resource: '*' — a deliberate
+              # simplification for a personal/demo project rather than
+              # hand-scoped per-ARN least privilege. Tightening this is
+              # possible later without touching the trust policy above
+              # (which is the part that actually matters for "who can
+              # assume this role").
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                  - lambda:*
+                  - dynamodb:*
+                  - s3:*
+                  - cloudfront:*
+                  - apigateway:*
+                  - events:*
+                  - scheduler:*
+                  - logs:*
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:UpdateRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:CreateServiceLinkedRole
+                Resource: '*'
+
+Outputs:
+  DeployRoleArn:
+    Description: Set this as the AWS_DEPLOY_ROLE_ARN repo variable in GitHub.
+    Value: !GetAtt GitHubActionsDeployRole.Arn

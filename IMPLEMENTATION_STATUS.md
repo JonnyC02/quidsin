@@ -2,10 +2,10 @@
 
 ## Current phase
 
-**Phase 5 — AWS SAM Deployment: complete.** Authentication was replaced
-with Google Sign-In between Phase 2 and Phase 3 (see "Authentication
-replaced with Google Sign-In" below) — this superseded Phase 2's
-original password-based auth before Phase 3 began.
+**Phase 6 — Public CI/CD and Demo Environment: complete.** Authentication
+was replaced with Google Sign-In between Phase 2 and Phase 3 (see
+"Authentication replaced with Google Sign-In" below) — this superseded
+Phase 2's original password-based auth before Phase 3 began.
 
 ## Completed functionality
 
@@ -234,6 +234,45 @@ and running `deploy-web.sh` against a real stack are the parts that need
 the user's own AWS account and are left for them — see
 `docs/deploying-to-aws.md`.
 
+### Phase 6 — Public CI/CD and Demo Environment
+
+- **`.github/workflows/ci.yml`** (new): a `verify` job on every PR and
+  push to `main` — lint, typecheck, the full test suite against a real
+  DynamoDB Local **service container** (not skipped, same pinned
+  `3.3.2` image as everywhere else), the full build, and `sam validate
+  --lint` + `sam build` on the Phase 5 template (a real regression
+  guard for the esbuild bundling issues found by hand in that phase).
+  None of this needs AWS credentials. A `deploy-demo` job then runs only
+  on `main`, after `verify` passes, deploying a separate `quidsin-demo`
+  SAM stack and the web app against it.
+- **AWS credentials via OIDC, not stored access keys**: `deploy-demo`
+  assumes an IAM role via GitHub's own OIDC provider
+  (`aws-actions/configure-aws-credentials`, `id-token: write`) — nothing
+  with standing AWS access ever sits in GitHub's secret store. The
+  role's trust policy (`deploy/aws/github-oidc.yaml`) is scoped to
+  `repo:JonnyC02/quidsin:ref:refs/heads/main` specifically, so no fork's
+  PR and no other branch can ever assume it.
+- **The demo stack is fully separate from any personal deployment** —
+  its own `Stage: demo`, its own DynamoDB table, its own SSM parameters.
+  CI/CD can never touch whatever a self-hoster deploys themselves via
+  `docs/deploying-to-aws.md`.
+- **No Plaid or encryption secrets ever reach GitHub** — only the
+  already-public Google Client ID and the (non-sensitive) role ARN and
+  region pass through as repo variables. The Plaid/encryption secrets
+  stay exactly where Phase 5 put them: SSM, fetched by the Lambda itself
+  at runtime, never read by the pipeline.
+
+Verified: the OIDC bootstrap template (`github-oidc.yaml`) against the
+real `aws cloudformation validate-template` API (read-only — found along
+the way that `AWS::IAM::OIDCProvider` no longer needs or validates a
+pinned `ThumbprintList`, so the template omits one rather than carrying
+a guessed value); the workflow YAML's syntax; and a full
+typecheck/lint/test/build, unchanged from Phase 5 since this phase
+touches no application code. Actually exercising the pipeline — a real
+PR running `verify`, a real merge running `deploy-demo`, the OIDC role
+assumption actually succeeding — needs the user's own GitHub repo and
+AWS account and is left for them, per `docs/ci-cd.md`.
+
 ## Authentication replaced with Google Sign-In
 
 Shortly after Phase 2 shipped, authentication was replaced entirely —
@@ -281,7 +320,6 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 6** — public CI/CD and demo environment.
 - **Phase 7** — private hosted edition (separate repository).
 - **Phase 8** — cross-repository automation.
 
@@ -593,3 +631,33 @@ Two further choices made without needing a question:
   client in, instead of config flags controlling internal branching, kept
   the shared function from needing to know which environment it's in at
   all.
+
+### Phase 6
+
+Two design questions were resolved with the user up front:
+
+1. **AWS credentials via OIDC federation, not long-lived access keys.**
+   The same category of trade-off as Phase 5's SSM-over-dynamic-references
+   choice — a bit more one-time setup (an IAM OIDC provider + role,
+   deployed by hand) in exchange for nothing with standing AWS access
+   ever sitting in GitHub's secret store.
+2. **A separate, auto-deployed `demo` stage, not the user's own
+   deployment.** Keeps CI/CD from ever being able to touch a
+   self-hoster's real data — it only ever has permission (via the OIDC
+   role's trust policy) to act as this repo's own pipeline, and the
+   stack it deploys to (`quidsin-demo`) is independent of whatever stack
+   name/stage someone runs for themselves.
+
+One further choice made without needing a question:
+
+- **The IAM deploy role's permissions policy is broad-but-named
+  (`Resource: '*'` across CloudFormation/Lambda/DynamoDB/S3/CloudFront/
+  API Gateway/EventBridge/IAM-role-management), not hand-scoped to
+  per-resource ARNs.** The trust policy — which actually decides *who*
+  can assume the role — is tightly scoped (this repo, main branch only);
+  the permissions policy decides what it can do once assumed, and for a
+  personal/demo project, hand-maintaining a least-privilege ARN list for
+  every resource type SAM touches was judged not worth the ongoing
+  maintenance burden relative to the security benefit, given the trust
+  policy is already the real access boundary. Documented here as a
+  stated trade-off rather than a silent gap.

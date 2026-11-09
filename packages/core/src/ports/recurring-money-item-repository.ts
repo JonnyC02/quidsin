@@ -1,4 +1,5 @@
 import type { RecurringMoneyItem } from '../domain/entities/recurring-money-item.js';
+import type { Visibility } from '../domain/entities/visibility.js';
 
 export interface NewRecurringMoneyItem {
   id: string;
@@ -19,6 +20,8 @@ export interface RecurringMoneyItemPatch {
   frequency?: RecurringMoneyItem['frequency'];
   anchorDate?: string;
   description?: string;
+  visibility?: Visibility;
+  sharedWithUserIds?: string[];
   updatedAt: string;
 }
 

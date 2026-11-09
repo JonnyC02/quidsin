@@ -58,6 +58,17 @@ export class DynamoSessionRepository implements SessionRepository {
     );
   }
 
+  async updateTenant(id: string, tenantId: string): Promise<void> {
+    await this.docClient.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: keys.session(id),
+        UpdateExpression: 'SET tenantId = :tenantId',
+        ExpressionAttributeValues: { ':tenantId': tenantId },
+      }),
+    );
+  }
+
   async delete(id: string): Promise<void> {
     await this.docClient.send(
       new DeleteCommand({ TableName: this.tableName, Key: keys.session(id) }),

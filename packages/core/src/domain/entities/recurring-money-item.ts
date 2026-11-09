@@ -12,6 +12,8 @@ export interface RecurringMoneyItem {
   tenantId: string;
   ownerId: string;
   visibility: Visibility;
+  /** Only meaningful when `visibility === 'shared'` — the specific tenant members who can see it. */
+  sharedWithUserIds?: string[];
   name: string;
   amountMinorUnits: number;
   frequency: Frequency;

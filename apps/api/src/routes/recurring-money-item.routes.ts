@@ -21,6 +21,11 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.partial();
 
+const updateVisibilitySchema = z.object({
+  visibility: z.enum(['private', 'shared', 'tenant']),
+  sharedWithUserIds: z.array(z.string()).optional(),
+});
+
 /**
  * Shared route factory for income and expense — identical shape in Phase
  * 2. Mounted at /income and /expenses with their respective services.
@@ -81,6 +86,21 @@ export function createRecurringMoneyItemRoutes<T extends RecurringMoneyItem>(
     '/:id/reactivate',
     asyncHandler(async (req, res) => {
       res.json({ item: await service.setActive(req.authContext!, req.params.id!, true) });
+    }),
+  );
+
+  router.post(
+    '/:id/visibility',
+    asyncHandler(async (req, res) => {
+      const input = parseOrThrow(updateVisibilitySchema, req.body);
+      res.json({
+        item: await service.setVisibility(
+          req.authContext!,
+          req.params.id!,
+          input.visibility,
+          input.sharedWithUserIds,
+        ),
+      });
     }),
   );
 

@@ -16,6 +16,15 @@ export class ConflictError extends Error {
   }
 }
 
+export class ForbiddenError extends Error {
+  readonly code = 'FORBIDDEN';
+
+  constructor(message = 'Forbidden') {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 export class InvalidCredentialsError extends Error {
   readonly code = 'INVALID_CREDENTIALS';
 

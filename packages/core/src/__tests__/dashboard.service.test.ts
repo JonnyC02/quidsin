@@ -9,7 +9,7 @@ import {
 import type { IncomeSource } from '../domain/entities/income.js';
 import type { RecurringExpense } from '../domain/entities/expense.js';
 
-const ctx = { userId: 'user-a', tenantId: 'tenant-a' };
+const ctx = { userId: 'user-a', tenantId: 'tenant-a', role: 'owner' as const };
 
 function buildDashboard() {
   const clock = new FixedClock(new Date('2026-03-01T00:00:00.000Z'));

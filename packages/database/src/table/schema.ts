@@ -36,6 +36,18 @@ export const keys = {
   }),
   /** The entire sync queue lives in one partition — always small at this app's scale. */
   job: (plaidItemId: string): PrimaryKey => ({ pk: 'QUEUE#SYNC', sk: `JOB#${plaidItemId}` }),
+  membership: (tenantId: string, userId: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `MEMBER#${userId}`,
+  }),
+  invite: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `INVITE#${id}`,
+  }),
+  auditEvent: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `AUDIT#${id}`,
+  }),
   tenantPrefix: (tenantId: string): string => `TENANT#${tenantId}`,
 } as const;
 
@@ -54,6 +66,17 @@ export const gsi1 = {
     gsi1pk: `PLAID_ITEM#${plaidItemId}`,
     gsi1sk: `PLAID_ITEM#${plaidItemId}`,
   }),
+  /** A third non-colliding prefix on GSI1 — lists every tenant a user belongs to. */
+  membershipByUser: (userId: string, tenantId: string): Gsi1Key => ({
+    gsi1pk: `USER#${userId}`,
+    gsi1sk: `MEMBERSHIP#${tenantId}`,
+  }),
+  /** A fourth — looks up pending invites addressed to an email, independent of tenant. */
+  inviteByEmail: (email: string, inviteId: string): Gsi1Key => ({
+    gsi1pk: `INVITE_EMAIL#${email.toLowerCase()}`,
+    gsi1sk: `INVITE#${inviteId}`,
+  }),
+  inviteEmailPrefix: (email: string): string => `INVITE_EMAIL#${email.toLowerCase()}`,
 } as const;
 
 /** Internal DynamoDB item attributes that must never leak into a domain entity. */

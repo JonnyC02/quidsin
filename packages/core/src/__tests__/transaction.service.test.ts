@@ -1,15 +1,42 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NotFoundError, TransactionService } from '../index.js';
-import { FixedClock, InMemoryTransactionRepository } from './fakes.js';
+import { FixedClock, InMemoryAccountRepository, InMemoryTransactionRepository } from './fakes.js';
 
-const ctxA = { userId: 'user-a', tenantId: 'tenant-a' };
-const ctxB = { userId: 'user-b', tenantId: 'tenant-b' };
+const ctxA = { userId: 'user-a', tenantId: 'tenant-a', role: 'owner' as const };
+const ctxB = { userId: 'user-b', tenantId: 'tenant-b', role: 'owner' as const };
 
-function buildService() {
+async function buildService() {
   const repository = new InMemoryTransactionRepository();
+  const accountRepository = new InMemoryAccountRepository();
   const clock = new FixedClock(new Date('2026-01-01T00:00:00.000Z'));
-  const service = new TransactionService({ repository, clock });
-  return { service, repository, clock };
+  const service = new TransactionService({ repository, accountRepository, clock });
+
+  // Transactions inherit visibility from their owning account — seed the
+  // accounts both test tenants' transactions point at.
+  await accountRepository.create({
+    id: 'account-1',
+    tenantId: ctxA.tenantId,
+    ownerId: ctxA.userId,
+    name: 'Checking',
+    type: 'current',
+    currency: 'GBP',
+    balanceMinorUnits: 0,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+  await accountRepository.create({
+    id: 'account-b-1',
+    tenantId: ctxB.tenantId,
+    ownerId: ctxB.userId,
+    name: 'Checking',
+    type: 'current',
+    currency: 'GBP',
+    balanceMinorUnits: 0,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  return { service, repository, accountRepository, clock };
 }
 
 async function seedTransaction(repository: InMemoryTransactionRepository, overrides: Partial<Parameters<InMemoryTransactionRepository['upsert']>[0]> = {}) {
@@ -30,15 +57,19 @@ async function seedTransaction(repository: InMemoryTransactionRepository, overri
 }
 
 describe('TransactionService', () => {
-  let ctx: ReturnType<typeof buildService>;
+  let ctx: Awaited<ReturnType<typeof buildService>>;
 
-  beforeEach(() => {
-    ctx = buildService();
+  beforeEach(async () => {
+    ctx = await buildService();
   });
 
   it('lists transactions scoped to the caller tenant', async () => {
     await seedTransaction(ctx.repository);
-    await seedTransaction(ctx.repository, { id: 'txn-2', tenantId: ctxB.tenantId });
+    await seedTransaction(ctx.repository, {
+      id: 'txn-2',
+      tenantId: ctxB.tenantId,
+      accountId: 'account-b-1',
+    });
 
     expect(await ctx.service.list(ctxA)).toHaveLength(1);
     expect(await ctx.service.list(ctxB)).toHaveLength(1);

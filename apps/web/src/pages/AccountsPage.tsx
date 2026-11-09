@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePlaidLink } from 'react-plaid-link';
+import type { Visibility } from '@quidsin/core';
 import { parseAmountToMinorUnits } from '@quidsin/shared';
 import { accounts, plaid } from '../lib/api.js';
 import { MoneyAmount } from '../components/MoneyAmount.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { AccountForm } from '../components/forms/AccountForm.js';
+import { VisibilityControl } from '../components/VisibilityControl.js';
 
 function ConnectBankButton({ onLinked }: { onLinked: () => void }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
@@ -66,6 +68,18 @@ export function AccountsPage() {
     onSuccess: invalidate,
   });
   const removeMutation = useMutation({ mutationFn: accounts.remove, onSuccess: invalidate });
+  const setVisibilityMutation = useMutation({
+    mutationFn: ({
+      id,
+      visibility,
+      sharedWithUserIds,
+    }: {
+      id: string;
+      visibility: Visibility;
+      sharedWithUserIds?: string[];
+    }) => accounts.setVisibility(id, visibility, sharedWithUserIds),
+    onSuccess: invalidate,
+  });
   const disconnectMutation = useMutation({ mutationFn: plaid.disconnectItem, onSuccess: invalidate });
   const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
   const syncMutation = useMutation({
@@ -120,6 +134,15 @@ export function AccountsPage() {
                     currency={account.currency}
                   />
                 </p>
+                <div className="mt-1">
+                  <VisibilityControl
+                    visibility={account.visibility}
+                    sharedWithUserIds={account.sharedWithUserIds}
+                    onChange={(visibility, sharedWithUserIds) =>
+                      setVisibilityMutation.mutate({ id: account.id, visibility, sharedWithUserIds })
+                    }
+                  />
+                </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {account.isManual ? (

@@ -2,10 +2,11 @@
 
 ## Current phase
 
-**Phase 3 — Plaid Bank Connections & Transaction Sync: complete.**
-Authentication was replaced with Google Sign-In between Phase 2 and
-Phase 3 (see "Authentication replaced with Google Sign-In" below) — this
-superseded Phase 2's original password-based auth before Phase 3 began.
+**Phase 4 — Tenant Membership, Visibility Enforcement, Roles & Audit
+Events: complete.** Authentication was replaced with Google Sign-In
+between Phase 2 and Phase 3 (see "Authentication replaced with Google
+Sign-In" below) — this superseded Phase 2's original password-based auth
+before Phase 3 began.
 
 ## Completed functionality
 
@@ -116,6 +117,69 @@ disconnecting a real connection) needs the user's own Plaid sandbox
 credentials and is intentionally left for them to run — see
 `docs/getting-started.md` ("Setting up Plaid (sandbox)").
 
+### Phase 4 — Tenant Membership, Visibility Enforcement, Roles & Audit Events
+
+- **Multi-tenant membership** (`packages/core/src/application/tenant-membership.service.ts`):
+  a user keeps their own personal tenant (auto-created at first Google
+  sign-in, as before) and can additionally belong to other tenants —
+  nothing is ever merged or migrated by accepting an invite. `AuthContext`
+  gained a `role: 'owner' | 'member'`, resolved fresh on every session
+  validation (`AuthService.validateSession`), so removing a member revokes
+  their access to that tenant immediately, not just at next login.
+- **In-app invites, not email**: an invite is addressed to an email and
+  stored as a pending record; it's surfaced to that person in-app (a
+  banner, `GET /tenants/invites/pending`) if/when they sign in with that
+  Google account. No notifier infrastructure was reintroduced (that was
+  deleted with the Google Sign-In switch).
+- **Two roles, Owner + Member**: the tenant's creator is its permanent
+  Owner (not transferable in this phase). Owners can invite/remove
+  members; Members get full read/write on their own and tenant-visible
+  records but can't manage membership. An Owner can't remove themselves
+  or leave their own tenant (they'd have to delete their account, and
+  that's blocked while any other member remains — see below).
+- **Visibility enforcement** (`packages/core/src/domain/visibility-rules.ts`'s
+  `canView`): `private` is owner-only, full stop — not even the tenant
+  Owner overrides it. `tenant` is visible to every current/future member.
+  `shared` is an explicit per-record member list (`sharedWithUserIds` on
+  `Account`/`RecurringMoneyItem`). Enforced in `list`/`getById` across
+  Income/Expense/Account, in the dashboard's totals (a private record is
+  excluded from a shared dashboard's aggregates entirely, not just hidden
+  but still counted), and for transactions (which carry no visibility of
+  their own — they inherit their owning account's).
+- **Session tenant-switching**: `POST /tenants/:id/switch` re-validates
+  membership and mutates the existing session row's `tenantId` in place —
+  same cookie, no new `Set-Cookie`. The web app invalidates every
+  tenant-scoped query on switch (`queryClient.invalidateQueries()` with no
+  filter, since everything is tenant-dependent).
+- **`deleteAccount` rewrite**: operates across every tenant the user
+  belongs to, not just whichever tenant their current session happens to
+  be scoped to — "delete my account" means delete the user, never "wipe
+  whatever tenant I'm currently acting in" (which could be someone else's
+  shared tenant). Validates first (refuses if the caller still owns a
+  tenant with other members) and only then acts: a solo-owned tenant is
+  wiped entirely (same cascade Phase 3 already did); a departing Member
+  only loses their own records, leaving the tenant and its other members
+  untouched.
+- **Audit events** (`AuditEventRepository`): membership/invite actions
+  (invited, accepted, declined, revoked, removed, left) are logged per
+  tenant and readable by the Owner via `GET /tenants/audit-log` and a
+  simple list in the web app's Settings page.
+- **`apps/web`**: a tenant switcher in the header (only shown once there's
+  actually a choice), a pending-invites banner, a "Household" section in
+  Settings (members, invite form, sent invites, leave button, audit log),
+  and a small Visibility control on Income/Expense/Account rows (only
+  shown once the tenant has more than one member).
+
+End-to-end verified without needing anything beyond the user's own Google
+accounts: full test suite (169 tests across every package/app, including
+live-DynamoDB tests for the new GSI1-backed membership/invite lookups and
+the idempotent-`ensureMembership` guarantee) green, typecheck, lint, and
+build all green. A real end-to-end two-account test (one real Google
+account inviting another, accepting, switching tenants, setting
+visibility, leaving, deleting an account once solo again) is the one
+piece left for the user to run themselves — see
+`docs/getting-started.md` ("Inviting someone to your tenant").
+
 ## Authentication replaced with Google Sign-In
 
 Shortly after Phase 2 shipped, authentication was replaced entirely —
@@ -163,10 +227,6 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 4** — tenant membership (multiple users per tenant), record
-  visibility _enforcement_ (`visibility` is a real attribute on every
-  record already, but Phase 2 never sets it to anything but `"private"`
-  or checks it), roles, audit events.
 - **Phase 5** — AWS SAM deployment (`deploy/aws/` doesn't exist yet;
   `DynamoDbAwsAdapter` is a stub; `ensureTableExists` is a dev/self-hosted
   convenience, not a production provisioning mechanism).
@@ -269,7 +329,24 @@ choice made after that trade-off was explained, not an oversight.
   Fixed with a `z.preprocess` step that treats `''` as `undefined` before
   the rest of the schema sees it.
 
-## Architectural decisions
+### Phase 4
+
+- **`tsc -b`'s function-parameter contravariance check catches something
+  `vitest` (esbuild) silently lets through.** A route test's helper
+  typed a seed callback as `(token: string, identity: Record<string,
+  unknown>) => void` instead of the real `FakeGoogleIdentityVerifier`
+  type; `vitest run` passed anyway (esbuild strips types, no check), but
+  `tsc -b --force` caught the unsound assignment immediately. Confirms
+  the project's existing practice of gating on a real `tsc -b` build, not
+  just the test runner, before calling anything green.
+- **`AuthContext` gaining a required `role` field rippled into every test
+  file that builds one as a literal** (`{ userId, tenantId }`) rather
+  than through a shared helper. Fixed by locating the small number of
+  shared `const ctxA = {...}` definitions per file (not dozens of inline
+  literals, as it first looked) and adding `role` to each — a reminder
+  that a core type change's blast radius is usually smaller than the
+  raw error count suggests once you find where the literals actually
+  live.
 
 See the approved plans for full rationale; summarized:
 
@@ -354,3 +431,46 @@ See the approved plans for full rationale; summarized:
    confirmed with the user specifically to avoid adding new required
    infrastructure for self-hosters, mirroring the existing `Local`/`AWS`
    adapter-pair pattern already used for the database.
+
+### Phase 4
+
+Four design questions were resolved with the user up front; summarized
+here, full rationale in the approved plan:
+
+1. **Multi-tenant membership, not merge-on-accept.** A user keeps their
+   own account and personal tenant and can additionally join other
+   tenants, picking which one they're acting in per session. No existing
+   user's data is ever migrated or merged by accepting an invite — the
+   alternative (folding the invitee fully into the inviter's tenant)
+   would have been destructive for anyone who already has their own data.
+2. **In-app invites, not email.** No notifier infrastructure exists since
+   the Google Sign-In switch deleted it; rebuilding one just for invites
+   would have reintroduced exactly the infrastructure that switch removed.
+   An invite is addressed to an email, stored as a pending record, and
+   surfaced in-app on sign-in.
+3. **Two roles (Owner + Member), one permanent Owner per tenant, not
+   transferable.** Sized to the household/couple use case the spec
+   describes, without building a role matrix nothing yet needs. Owners
+   can't remove themselves or leave their own tenant — the only way out
+   is deleting the account, which is itself blocked while any other
+   member remains, so a tenant can never end up ownerless.
+4. **Visibility: `private` is owner-only even from the Owner; `shared` is
+   an explicit per-record member list; `tenant` is everyone.** The Owner
+   role is purely administrative (membership management) — it was a
+   deliberate choice *not* to let it double as a visibility override,
+   since that would undermine the privacy a "private" record is supposed
+   to guarantee for a household/couple use case.
+
+Two further decisions made without needing a question, because the
+existing code already implied a clear, defensible default:
+
+- **A transaction has no visibility of its own — it inherits its owning
+  account's.** Transactions didn't exist when visibility was first
+  designed in Phase 2; giving them a redundant parallel field would have
+  meant keeping two things in sync for no benefit, since a transaction is
+  never independently owned or shared apart from its account.
+- **A shared dashboard's totals exclude a member's private records
+  entirely, not just hide them while still counting them.** The more
+  conservative reading of "private" — a visible total that was secretly
+  inflated by a hidden number would leak information through the total
+  itself.

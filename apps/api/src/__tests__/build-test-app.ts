@@ -10,6 +10,7 @@ import {
   PlaidWebhookService,
   RandomUuidGenerator,
   SystemClock,
+  TenantMembershipService,
   TransactionService,
 } from '@quidsin/core';
 import type { IncomeSource } from '@quidsin/core';
@@ -19,11 +20,15 @@ import {
   FakeBankingProvider,
   FakeGoogleIdentityVerifier,
   InMemoryAccountRepository,
+  InMemoryAuditEventRepository,
   InMemoryEncryptionService,
   InMemoryJobQueue,
   InMemoryPlaidItemRepository,
   InMemoryRecurringMoneyItemRepository,
   InMemorySessionRepository,
+  InMemoryTenantInviteRepository,
+  InMemoryTenantMembershipRepository,
+  InMemoryTenantRepository,
   InMemoryTransactionRepository,
   InMemoryUserRepository,
 } from './fakes.js';
@@ -50,6 +55,7 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
   const bankingProvider = new FakeBankingProvider();
 
   const userRepository = new InMemoryUserRepository();
+  const tenantRepository = new InMemoryTenantRepository(userRepository);
   const sessionRepository = new InMemorySessionRepository();
   const incomeRepository = new InMemoryRecurringMoneyItemRepository<IncomeSource>();
   const expenseRepository = new InMemoryRecurringMoneyItemRepository<RecurringExpense>();
@@ -58,6 +64,9 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
   const transactionRepository = new InMemoryTransactionRepository();
   const jobQueue = new InMemoryJobQueue();
   const encryptionService = new InMemoryEncryptionService();
+  const tenantMembershipRepository = new InMemoryTenantMembershipRepository();
+  const tenantInviteRepository = new InMemoryTenantInviteRepository();
+  const auditEventRepository = new InMemoryAuditEventRepository();
 
   const authService = new AuthService({
     userRepository,
@@ -68,6 +77,9 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
     accountRepository,
     plaidItemRepository,
     transactionRepository,
+    tenantMembershipRepository,
+    tenantInviteRepository,
+    auditEventRepository,
     bankingProvider,
     encryptionService,
     clock,
@@ -96,8 +108,22 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
     idGenerator,
     config: {},
   });
-  const transactionService = new TransactionService({ repository: transactionRepository, clock });
+  const transactionService = new TransactionService({
+    repository: transactionRepository,
+    accountRepository,
+    clock,
+  });
   const plaidWebhookService = new PlaidWebhookService({ bankingProvider, plaidItemRepository, jobQueue });
+  const tenantMembershipService = new TenantMembershipService({
+    tenantMembershipRepository,
+    tenantInviteRepository,
+    auditEventRepository,
+    userRepository,
+    tenantRepository,
+    sessionRepository,
+    clock,
+    idGenerator,
+  });
 
   const app = createApp({
     database: new FakeDatabase(options.databaseHealthy ?? true),
@@ -109,6 +135,8 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
     bankConnectionService,
     transactionService,
     plaidWebhookService,
+    tenantMembershipService,
+    tenantRepository,
     webOrigin: 'http://localhost:5173',
     sessionCookieSecure: false,
   });

@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import {
   ConflictError,
+  ForbiddenError,
   InvalidCredentialsError,
   NotFoundError,
   ValidationError,
@@ -14,6 +15,11 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 
   if (err instanceof InvalidCredentialsError) {
     res.status(401).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+
+  if (err instanceof ForbiddenError) {
+    res.status(403).json({ error: { code: err.code, message: err.message } });
     return;
   }
 

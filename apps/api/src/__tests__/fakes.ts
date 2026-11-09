@@ -2,6 +2,8 @@ import type {
   Account,
   AccountPatch,
   AccountRepository,
+  AuditEvent,
+  AuditEventRepository,
   BankingProvider,
   EncryptedPayload,
   EncryptionService,
@@ -9,12 +11,15 @@ import type {
   GoogleIdentity,
   GoogleIdentityVerifier,
   GoogleProfile,
+  InviteStatus,
   JobQueue,
   LinkTokenRequest,
   NewAccount,
+  NewAuditEvent,
   NewPlaidItem,
   NewRecurringMoneyItem,
   NewSession,
+  NewTenantInvite,
   NewTransaction,
   PlaidAccountInfo,
   PlaidItem,
@@ -27,6 +32,12 @@ import type {
   SyncJob,
   SyncPage,
   Tenant,
+  TenantInvite,
+  TenantInviteRepository,
+  TenantMembership,
+  TenantMembershipRepository,
+  TenantRepository,
+  TenantRole,
   Transaction,
   TransactionFilter,
   TransactionRepository,
@@ -90,6 +101,19 @@ export class InMemoryUserRepository implements UserRepository {
     this.usersByGoogleSub.delete(userId);
     this.tenantsById.delete(tenantId);
   }
+
+  getTenantById(id: string): Tenant | null {
+    return this.tenantsById.get(id) ?? null;
+  }
+}
+
+/** Thin wrapper delegating to the tenants InMemoryUserRepository already tracks — one source of truth. */
+export class InMemoryTenantRepository implements TenantRepository {
+  constructor(private readonly userRepository: InMemoryUserRepository) {}
+
+  async findById(id: string): Promise<Tenant | null> {
+    return this.userRepository.getTenantById(id);
+  }
 }
 
 export class InMemorySessionRepository implements SessionRepository {
@@ -108,6 +132,13 @@ export class InMemorySessionRepository implements SessionRepository {
     const session = this.sessions.get(id);
     if (session) {
       this.sessions.set(id, { ...session, expiresAt });
+    }
+  }
+
+  async updateTenant(id: string, tenantId: string): Promise<void> {
+    const session = this.sessions.get(id);
+    if (session) {
+      this.sessions.set(id, { ...session, tenantId });
     }
   }
 
@@ -505,6 +536,126 @@ export class InMemoryTransactionRepository implements TransactionRepository {
     for (const [id, transaction] of this.transactionsById) {
       if (transaction.tenantId === tenantId) {
         this.transactionsById.delete(id);
+      }
+    }
+  }
+}
+
+export class InMemoryTenantMembershipRepository implements TenantMembershipRepository {
+  private readonly membershipsByKey = new Map<string, TenantMembership>();
+
+  private key(tenantId: string, userId: string): string {
+    return `${tenantId}:${userId}`;
+  }
+
+  async ensureMembership(
+    tenantId: string,
+    userId: string,
+    role: TenantRole,
+    createdAt: string,
+  ): Promise<TenantMembership> {
+    const existing = this.membershipsByKey.get(this.key(tenantId, userId));
+    if (existing) {
+      return existing;
+    }
+    const record: TenantMembership = { tenantId, userId, role, createdAt };
+    this.membershipsByKey.set(this.key(tenantId, userId), record);
+    return record;
+  }
+
+  async getRole(tenantId: string, userId: string): Promise<TenantRole | null> {
+    return this.membershipsByKey.get(this.key(tenantId, userId))?.role ?? null;
+  }
+
+  async listForTenant(tenantId: string): Promise<TenantMembership[]> {
+    return [...this.membershipsByKey.values()].filter((m) => m.tenantId === tenantId);
+  }
+
+  async listForUser(userId: string): Promise<TenantMembership[]> {
+    return [...this.membershipsByKey.values()].filter((m) => m.userId === userId);
+  }
+
+  async remove(tenantId: string, userId: string): Promise<void> {
+    this.membershipsByKey.delete(this.key(tenantId, userId));
+  }
+
+  async removeAllForTenant(tenantId: string): Promise<void> {
+    for (const [key, membership] of this.membershipsByKey) {
+      if (membership.tenantId === tenantId) {
+        this.membershipsByKey.delete(key);
+      }
+    }
+  }
+}
+
+export class InMemoryTenantInviteRepository implements TenantInviteRepository {
+  private readonly invitesById = new Map<string, TenantInvite>();
+
+  async create(invite: NewTenantInvite): Promise<TenantInvite> {
+    const record: TenantInvite = { ...invite, status: 'pending' };
+    this.invitesById.set(invite.id, record);
+    return record;
+  }
+
+  async getById(tenantId: string, id: string): Promise<TenantInvite | null> {
+    const invite = this.invitesById.get(id);
+    return invite && invite.tenantId === tenantId ? invite : null;
+  }
+
+  async listForTenant(tenantId: string): Promise<TenantInvite[]> {
+    return [...this.invitesById.values()].filter((invite) => invite.tenantId === tenantId);
+  }
+
+  async listPendingByEmail(email: string): Promise<TenantInvite[]> {
+    const lower = email.toLowerCase();
+    return [...this.invitesById.values()].filter(
+      (invite) => invite.invitedEmail.toLowerCase() === lower && invite.status === 'pending',
+    );
+  }
+
+  async updateStatus(
+    tenantId: string,
+    id: string,
+    status: InviteStatus,
+    respondedAt: string,
+  ): Promise<TenantInvite> {
+    const existing = this.invitesById.get(id);
+    if (!existing || existing.tenantId !== tenantId) {
+      throw new Error('Not found in fake repository');
+    }
+    const updated: TenantInvite = { ...existing, status, respondedAt };
+    this.invitesById.set(id, updated);
+    return updated;
+  }
+
+  async removeAllForTenant(tenantId: string): Promise<void> {
+    for (const [id, invite] of this.invitesById) {
+      if (invite.tenantId === tenantId) {
+        this.invitesById.delete(id);
+      }
+    }
+  }
+}
+
+export class InMemoryAuditEventRepository implements AuditEventRepository {
+  private readonly eventsById = new Map<string, AuditEvent>();
+
+  async create(event: NewAuditEvent): Promise<AuditEvent> {
+    const record: AuditEvent = { ...event };
+    this.eventsById.set(event.id, record);
+    return record;
+  }
+
+  async listForTenant(tenantId: string): Promise<AuditEvent[]> {
+    return [...this.eventsById.values()]
+      .filter((event) => event.tenantId === tenantId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async removeAllForTenant(tenantId: string): Promise<void> {
+    for (const [id, event] of this.eventsById) {
+      if (event.tenantId === tenantId) {
+        this.eventsById.delete(id);
       }
     }
   }

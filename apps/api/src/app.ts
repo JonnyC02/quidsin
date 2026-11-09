@@ -11,6 +11,8 @@ import type {
   ExpenseService,
   IncomeService,
   PlaidWebhookService,
+  TenantMembershipService,
+  TenantRepository,
   TransactionService,
 } from '@quidsin/core';
 import { createAuthRoutes } from './routes/auth.routes.js';
@@ -20,6 +22,7 @@ import { createDashboardRoutes } from './routes/dashboard.routes.js';
 import { createPlaidRoutes } from './routes/plaid.routes.js';
 import { createPlaidWebhookRoutes } from './routes/plaid-webhook.routes.js';
 import { createTransactionRoutes } from './routes/transaction.routes.js';
+import { createTenantRoutes } from './routes/tenant.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 export interface AppDeps {
@@ -32,6 +35,8 @@ export interface AppDeps {
   bankConnectionService: BankConnectionService;
   transactionService: TransactionService;
   plaidWebhookService: PlaidWebhookService;
+  tenantMembershipService: TenantMembershipService;
+  tenantRepository: TenantRepository;
   webOrigin: string;
   sessionCookieSecure: boolean;
 }
@@ -81,6 +86,7 @@ export function createApp(deps: AppDeps): Express {
     '/auth',
     createAuthRoutes({
       authService: deps.authService,
+      tenantRepository: deps.tenantRepository,
       sessionCookieSecure: deps.sessionCookieSecure,
     }),
   );
@@ -90,6 +96,7 @@ export function createApp(deps: AppDeps): Express {
   app.use('/dashboard', createDashboardRoutes(deps.dashboardService, deps.authService));
   app.use('/plaid', createPlaidRoutes(deps.bankConnectionService, deps.authService));
   app.use('/transactions', createTransactionRoutes(deps.transactionService, deps.authService));
+  app.use('/tenants', createTenantRoutes(deps.tenantMembershipService, deps.authService));
 
   app.use(errorHandler);
 

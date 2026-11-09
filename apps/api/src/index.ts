@@ -4,11 +4,15 @@ import {
   createDynamoDbClient,
   DynamoDbLocalAdapter,
   DynamoAccountRepository,
+  DynamoAuditEventRepository,
   DynamoDbJobQueue,
   DynamoExpenseRepository,
   DynamoIncomeRepository,
   DynamoPlaidItemRepository,
   DynamoSessionRepository,
+  DynamoTenantInviteRepository,
+  DynamoTenantMembershipRepository,
+  DynamoTenantRepository,
   DynamoTransactionRepository,
   DynamoUserRepository,
   ensureTableExists,
@@ -24,6 +28,7 @@ import {
   PlaidWebhookService,
   RandomUuidGenerator,
   SystemClock,
+  TenantMembershipService,
   TransactionService,
 } from '@quidsin/core';
 import { createPlaidClient, PlaidBankingProvider } from '@quidsin/banking';
@@ -51,6 +56,7 @@ const tableName = config.DYNAMODB_TABLE_NAME;
 await ensureTableExists(dynamoClient, tableName);
 
 const userRepository = new DynamoUserRepository(docClient, tableName);
+const tenantRepository = new DynamoTenantRepository(docClient, tableName);
 const sessionRepository = new DynamoSessionRepository(docClient, tableName);
 const incomeRepository = new DynamoIncomeRepository(docClient, tableName);
 const expenseRepository = new DynamoExpenseRepository(docClient, tableName);
@@ -58,6 +64,9 @@ const accountRepository = new DynamoAccountRepository(docClient, tableName);
 const plaidItemRepository = new DynamoPlaidItemRepository(docClient, tableName);
 const transactionRepository = new DynamoTransactionRepository(docClient, tableName);
 const jobQueue = new DynamoDbJobQueue(docClient, tableName);
+const tenantMembershipRepository = new DynamoTenantMembershipRepository(docClient, tableName);
+const tenantInviteRepository = new DynamoTenantInviteRepository(docClient, tableName);
+const auditEventRepository = new DynamoAuditEventRepository(docClient, tableName);
 
 const clock = new SystemClock();
 const idGenerator = new RandomUuidGenerator();
@@ -84,6 +93,9 @@ const authService = new AuthService({
   accountRepository,
   plaidItemRepository,
   transactionRepository,
+  tenantMembershipRepository,
+  tenantInviteRepository,
+  auditEventRepository,
   bankingProvider,
   encryptionService,
   clock,
@@ -114,8 +126,22 @@ const bankConnectionService = new BankConnectionService({
     webhookUrl: config.PLAID_WEBHOOK_URL,
   },
 });
-const transactionService = new TransactionService({ repository: transactionRepository, clock });
+const transactionService = new TransactionService({
+  repository: transactionRepository,
+  accountRepository,
+  clock,
+});
 const plaidWebhookService = new PlaidWebhookService({ bankingProvider, plaidItemRepository, jobQueue });
+const tenantMembershipService = new TenantMembershipService({
+  tenantMembershipRepository,
+  tenantInviteRepository,
+  auditEventRepository,
+  userRepository,
+  tenantRepository,
+  sessionRepository,
+  clock,
+  idGenerator,
+});
 
 const app = createApp({
   database,
@@ -127,6 +153,8 @@ const app = createApp({
   bankConnectionService,
   transactionService,
   plaidWebhookService,
+  tenantMembershipService,
+  tenantRepository,
   webOrigin: config.WEB_ORIGIN,
   sessionCookieSecure: config.SESSION_COOKIE_SECURE,
 });

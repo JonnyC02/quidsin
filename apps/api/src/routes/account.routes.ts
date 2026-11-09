@@ -27,6 +27,11 @@ const updateSchema = createSchema.omit({ balanceMinorUnits: true }).partial();
 
 const updateBalanceSchema = z.object({ balanceMinorUnits: z.number().int() });
 
+const updateVisibilitySchema = z.object({
+  visibility: z.enum(['private', 'shared', 'tenant']),
+  sharedWithUserIds: z.array(z.string()).optional(),
+});
+
 export function createAccountRoutes(service: AccountService, authService: AuthService): Router {
   const router = Router();
   router.use(requireAuth(authService));
@@ -78,6 +83,21 @@ export function createAccountRoutes(service: AccountService, authService: AuthSe
           req.authContext!,
           req.params.id!,
           input.balanceMinorUnits,
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/:id/visibility',
+    asyncHandler(async (req, res) => {
+      const input = parseOrThrow(updateVisibilitySchema, req.body);
+      res.json({
+        account: await service.setVisibility(
+          req.authContext!,
+          req.params.id!,
+          input.visibility,
+          input.sharedWithUserIds,
         ),
       });
     }),

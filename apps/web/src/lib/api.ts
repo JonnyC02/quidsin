@@ -1,11 +1,17 @@
 import type {
   Account,
   AccountType,
+  AuditEvent,
   DashboardSummary,
   Frequency,
   IncomeSource,
+  MemberSummary,
   RecurringExpense,
+  Tenant,
+  TenantInvite,
+  TenantRole,
   Transaction,
+  Visibility,
 } from '@quidsin/core';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001';
@@ -69,7 +75,14 @@ export function logout(): Promise<void> {
   return request('/auth/logout', { method: 'POST' });
 }
 
-export function getCurrentSession(): Promise<{ userId: string; tenantId: string }> {
+export interface CurrentSession {
+  userId: string;
+  tenantId: string;
+  tenantName?: string;
+  role: TenantRole;
+}
+
+export function getCurrentSession(): Promise<CurrentSession> {
   return request('/auth/me');
 }
 
@@ -114,6 +127,17 @@ function setRecurringMoneyItemActive<T>(basePath: string, id: string, active: bo
 function removeRecurringMoneyItem(basePath: string, id: string): Promise<void> {
   return request(`${basePath}/${id}`, { method: 'DELETE' });
 }
+function setRecurringMoneyItemVisibility<T>(
+  basePath: string,
+  id: string,
+  visibility: Visibility,
+  sharedWithUserIds?: string[],
+): Promise<T> {
+  return request<{ item: T }>(`${basePath}/${id}/visibility`, {
+    method: 'POST',
+    body: JSON.stringify({ visibility, sharedWithUserIds }),
+  }).then((r) => r.item);
+}
 
 export const income = {
   list: () => listRecurringMoneyItems<IncomeSource>('/income'),
@@ -123,6 +147,8 @@ export const income = {
     updateRecurringMoneyItem<IncomeSource>('/income', id, input),
   setActive: (id: string, active: boolean) =>
     setRecurringMoneyItemActive<IncomeSource>('/income', id, active),
+  setVisibility: (id: string, visibility: Visibility, sharedWithUserIds?: string[]) =>
+    setRecurringMoneyItemVisibility<IncomeSource>('/income', id, visibility, sharedWithUserIds),
   remove: (id: string) => removeRecurringMoneyItem('/income', id),
 };
 
@@ -134,6 +160,13 @@ export const expenses = {
     updateRecurringMoneyItem<RecurringExpense>('/expenses', id, input),
   setActive: (id: string, active: boolean) =>
     setRecurringMoneyItemActive<RecurringExpense>('/expenses', id, active),
+  setVisibility: (id: string, visibility: Visibility, sharedWithUserIds?: string[]) =>
+    setRecurringMoneyItemVisibility<RecurringExpense>(
+      '/expenses',
+      id,
+      visibility,
+      sharedWithUserIds,
+    ),
   remove: (id: string) => removeRecurringMoneyItem('/expenses', id),
 };
 
@@ -164,6 +197,11 @@ export const accounts = {
     request<{ account: Account }>(`/accounts/${id}/balance`, {
       method: 'POST',
       body: JSON.stringify({ balanceMinorUnits }),
+    }).then((r) => r.account),
+  setVisibility: (id: string, visibility: Visibility, sharedWithUserIds?: string[]) =>
+    request<{ account: Account }>(`/accounts/${id}/visibility`, {
+      method: 'POST',
+      body: JSON.stringify({ visibility, sharedWithUserIds }),
     }).then((r) => r.account),
   remove: (id: string) => request<void>(`/accounts/${id}`, { method: 'DELETE' }),
 };
@@ -218,4 +256,36 @@ export const transactions = {
       method: 'PATCH',
       body: JSON.stringify({ notes }),
     }).then((r) => r.transaction),
+};
+
+// --- Tenant membership --------------------------------------------------
+
+export const tenants = {
+  listMine: () =>
+    request<{ tenants: { tenant: Tenant; role: TenantRole }[] }>('/tenants').then((r) => r.tenants),
+  switchTo: (tenantId: string) =>
+    request<{ tenantId: string; role: TenantRole }>(`/tenants/${tenantId}/switch`, {
+      method: 'POST',
+    }),
+  listMembers: () =>
+    request<{ members: MemberSummary[] }>('/tenants/members').then((r) => r.members),
+  removeMember: (userId: string) =>
+    request<void>(`/tenants/members/${userId}`, { method: 'DELETE' }),
+  invite: (email: string) =>
+    request<{ invite: TenantInvite }>('/tenants/invites', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }).then((r) => r.invite),
+  listSentInvites: () =>
+    request<{ invites: TenantInvite[] }>('/tenants/invites').then((r) => r.invites),
+  revokeInvite: (inviteId: string) =>
+    request<void>(`/tenants/invites/${inviteId}`, { method: 'DELETE' }),
+  listPendingInvitesForMe: () =>
+    request<{ invites: TenantInvite[] }>('/tenants/invites/pending').then((r) => r.invites),
+  acceptInvite: (tenantId: string, inviteId: string) =>
+    request<void>(`/tenants/invites/${tenantId}/${inviteId}/accept`, { method: 'POST' }),
+  declineInvite: (tenantId: string, inviteId: string) =>
+    request<void>(`/tenants/invites/${tenantId}/${inviteId}/decline`, { method: 'POST' }),
+  leave: () => request<void>('/tenants/leave', { method: 'POST' }),
+  listAuditLog: () => request<{ events: AuditEvent[] }>('/tenants/audit-log').then((r) => r.events),
 };

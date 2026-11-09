@@ -13,6 +13,8 @@ export interface SessionRepository {
   findById(id: string): Promise<Session | null>;
   /** Sliding renewal — extends the session's expiry. */
   touch(id: string, expiresAt: string): Promise<void>;
+  /** Switches which tenant this session is currently acting in. */
+  updateTenant(id: string, tenantId: string): Promise<void>;
   delete(id: string): Promise<void>;
   deleteAllForUser(userId: string): Promise<void>;
 }

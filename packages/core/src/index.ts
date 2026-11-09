@@ -11,14 +11,21 @@ export type { RecurringExpense } from './domain/entities/expense.js';
 export type { Account, AccountType } from './domain/entities/account.js';
 export type { PlaidItem, PlaidItemStatus, EncryptedPayload } from './domain/entities/plaid-item.js';
 export type { Transaction } from './domain/entities/transaction.js';
+export type { TenantMembership, TenantRole } from './domain/entities/tenant-membership.js';
+export type { TenantInvite, InviteStatus } from './domain/entities/tenant-invite.js';
+export type { AuditEvent, AuditAction } from './domain/entities/audit-event.js';
 
 // Domain errors
 export {
   NotFoundError,
   ConflictError,
+  ForbiddenError,
   InvalidCredentialsError,
   ValidationError,
 } from './domain/errors.js';
+
+// Visibility
+export { canView, type VisibilityScoped } from './domain/visibility-rules.js';
 
 // Calculations
 export {
@@ -63,6 +70,9 @@ export type {
   NewTransaction,
   TransactionFilter,
 } from './ports/transaction-repository.js';
+export type { TenantMembershipRepository } from './ports/tenant-membership-repository.js';
+export type { TenantInviteRepository, NewTenantInvite } from './ports/tenant-invite-repository.js';
+export type { AuditEventRepository, NewAuditEvent } from './ports/audit-event-repository.js';
 
 // Application services
 export type { AuthContext } from './application/auth-context.js';
@@ -108,3 +118,8 @@ export {
   type PlaidWebhookServiceDeps,
   type PlaidWebhookPayload,
 } from './application/plaid-webhook.service.js';
+export {
+  TenantMembershipService,
+  type TenantMembershipServiceDeps,
+  type MemberSummary,
+} from './application/tenant-membership.service.js';

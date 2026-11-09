@@ -1,9 +1,11 @@
 import type { RecurringMoneyItem } from '../domain/entities/recurring-money-item.js';
 import type { Frequency } from '../domain/entities/frequency.js';
+import type { Visibility } from '../domain/entities/visibility.js';
 import type { RecurringMoneyItemRepository } from '../ports/recurring-money-item-repository.js';
 import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
 import { NotFoundError } from '../domain/errors.js';
+import { canView } from '../domain/visibility-rules.js';
 import type { AuthContext } from './auth-context.js';
 
 export interface RecurringMoneyItemServiceDeps<T extends RecurringMoneyItem> {
@@ -55,7 +57,7 @@ export class RecurringMoneyItemService<T extends RecurringMoneyItem> {
   }
 
   async update(ctx: AuthContext, id: string, input: UpdateRecurringMoneyItemInput): Promise<T> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
 
     return this.deps.repository.update(ctx.tenantId, id, {
       ...input,
@@ -64,7 +66,7 @@ export class RecurringMoneyItemService<T extends RecurringMoneyItem> {
   }
 
   async setActive(ctx: AuthContext, id: string, active: boolean): Promise<T> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
     return this.deps.repository.setActive(
       ctx.tenantId,
       id,
@@ -74,15 +76,48 @@ export class RecurringMoneyItemService<T extends RecurringMoneyItem> {
   }
 
   async remove(ctx: AuthContext, id: string): Promise<void> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
     await this.deps.repository.remove(ctx.tenantId, id);
   }
 
-  async list(ctx: AuthContext): Promise<T[]> {
-    return this.deps.repository.list(ctx.tenantId);
+  /**
+   * Not even the tenant Owner can change another member's record's
+   * visibility — "private" is private, full stop. Only the record's own
+   * owner can ever call this.
+   */
+  async setVisibility(
+    ctx: AuthContext,
+    id: string,
+    visibility: Visibility,
+    sharedWithUserIds?: string[],
+  ): Promise<T> {
+    await this.getOwned(ctx, id);
+
+    return this.deps.repository.update(ctx.tenantId, id, {
+      visibility,
+      sharedWithUserIds: visibility === 'shared' ? sharedWithUserIds : undefined,
+      updatedAt: this.deps.clock.now().toISOString(),
+    });
   }
 
+  async list(ctx: AuthContext): Promise<T[]> {
+    const items = await this.deps.repository.list(ctx.tenantId);
+    return items.filter((item) => canView(item, ctx));
+  }
+
+  /** A read — respects visibility, not strict ownership (a tenant/shared record is readable by others). */
   async getById(ctx: AuthContext, id: string): Promise<T> {
+    const item = await this.deps.repository.getById(ctx.tenantId, id);
+
+    if (!item || !canView(item, ctx)) {
+      throw new NotFoundError();
+    }
+
+    return item;
+  }
+
+  /** Strict ownership — used internally to gate mutation, regardless of visibility. */
+  private async getOwned(ctx: AuthContext, id: string): Promise<T> {
     const item = await this.deps.repository.getById(ctx.tenantId, id);
 
     if (!item || item.ownerId !== ctx.userId) {

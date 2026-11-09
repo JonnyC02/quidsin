@@ -8,6 +8,7 @@ import {
   remainingMonthlyIncome,
 } from '../domain/calculations/dashboard-totals.js';
 import { nextOccurrence, toIsoDateString } from '../domain/calculations/next-occurrence.js';
+import { canView } from '../domain/visibility-rules.js';
 import type { AuthContext } from './auth-context.js';
 
 export interface DashboardServiceDeps {
@@ -40,11 +41,18 @@ export class DashboardService {
   constructor(private readonly deps: DashboardServiceDeps) {}
 
   async getSummary(ctx: AuthContext): Promise<DashboardSummary> {
-    const [incomes, expenses, accounts] = await Promise.all([
+    const [allIncomes, allExpenses, allAccounts] = await Promise.all([
       this.deps.incomeRepository.list(ctx.tenantId),
       this.deps.expenseRepository.list(ctx.tenantId),
       this.deps.accountRepository.list(ctx.tenantId),
     ]);
+
+    // Private records are excluded entirely from a shared dashboard's
+    // totals, not just hidden-but-still-counted — the conservative,
+    // privacy-respecting default.
+    const incomes = allIncomes.filter((item) => canView(item, ctx));
+    const expenses = allExpenses.filter((item) => canView(item, ctx));
+    const accounts = allAccounts.filter((account) => canView(account, ctx));
 
     const activeIncomes = incomes.filter((item) => item.active);
     const activeExpenses = expenses.filter((item) => item.active);

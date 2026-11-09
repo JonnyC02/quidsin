@@ -73,6 +73,40 @@ sandbox credentials and can't be faked. Everything else (tests, typecheck,
 build, and even the sync/queue logic itself, which is tested against a
 fake banking provider) is fully verifiable without them.
 
+## Inviting someone to your tenant
+
+QuidsIn supports sharing a budget with someone else — a partner, a
+household — without merging accounts. No email is sent (there's no
+notifier infrastructure); invites are surfaced in-app instead.
+
+1. From **Settings → Household**, enter the other person's email address
+   and click **Invite**. You must be the Owner of the tenant you want to
+   share (the tenant you were auto-provisioned on your own first sign-in
+   always has you as its Owner).
+2. The invited person signs in to QuidsIn with the Google account that
+   matches that email address. If they already have a QuidsIn account,
+   this is their existing sign-in — nothing about their own data changes.
+3. They'll see a banner for the pending invite and can **Accept** or
+   **Decline**. Accepting adds them as a Member of your tenant; it never
+   touches their own personal tenant.
+4. Once accepted, they can switch into the shared tenant using the tenant
+   switcher in the header (it only appears once there's more than one
+   tenant to choose from) and back to their own at any time.
+5. By default, every record (income, expense, account) is **private** —
+   visible only to the person who created it, not even to the tenant
+   Owner. Use the Visibility control next to a record (only shown once
+   the tenant has more than one member) to make it visible to **Everyone**
+   in the tenant, or **Shared with…** specific members.
+6. From **Settings → Household**, the Owner can remove a member, revoke
+   a still-pending invite, or review the activity log. A Member can leave
+   the tenant themselves at any time. An Owner can't remove themselves or
+   leave their own tenant — deleting their account is the only way out,
+   and that's blocked while any other member is still present.
+
+Unlike the Plaid checklist above, a real end-to-end test of this flow
+needs nothing beyond two Google accounts you already have (or two browser
+profiles) — no third-party sandbox credentials required.
+
 ## Option A: Docker Compose (recommended)
 
 Set `GOOGLE_CLIENT_ID`, `VITE_GOOGLE_CLIENT_ID`, `PLAID_CLIENT_ID`,
@@ -95,7 +129,8 @@ Once all services report healthy (`docker compose -f deploy/docker/docker-compos
   recurring expenses, and accounts from the navigation. From the Accounts
   page, "Connect a bank" starts the Plaid Link flow; linked accounts get
   "Sync now" and "Disconnect" buttons, and their transactions show up on
-  the Transactions page once synced.
+  the Transactions page once synced. From Settings, invite someone else
+  to share this budget — see "Inviting someone to your tenant" above.
 - API health: http://localhost:3001/health
 - API readiness (checks DynamoDB): http://localhost:3001/health/ready
 - DynamoDB Local: http://localhost:8000

@@ -8,8 +8,10 @@ import {
 import type { IncomeSource } from '../domain/entities/income.js';
 import type { RecurringExpense } from '../domain/entities/expense.js';
 
-const ctxA = { userId: 'user-a', tenantId: 'tenant-a' };
-const ctxB = { userId: 'user-b', tenantId: 'tenant-b' };
+const ctxA = { userId: 'user-a', tenantId: 'tenant-a', role: 'owner' as const };
+const ctxB = { userId: 'user-b', tenantId: 'tenant-b', role: 'owner' as const };
+/** A second member sharing ctxA's tenant — for same-tenant visibility tests. */
+const ctxMember = { userId: 'user-member', tenantId: 'tenant-a', role: 'member' as const };
 
 function buildIncomeService() {
   const repository = new InMemoryRecurringMoneyItemRepository<IncomeSource>();
@@ -107,6 +109,22 @@ describe('IncomeService', () => {
 
     await ctx.service.remove(ctxA, income.id);
     await expect(ctx.service.getById(ctxA, income.id)).rejects.toThrow(NotFoundError);
+  });
+
+  it('a private income source is invisible to another member of the same tenant until shared with the tenant', async () => {
+    const income = await ctx.service.create(ctxA, {
+      name: 'Salary',
+      amountMinorUnits: 300_000,
+      frequency: 'monthly',
+      anchorDate: '2026-01-25',
+    });
+
+    await expect(ctx.service.getById(ctxMember, income.id)).rejects.toThrow(NotFoundError);
+    expect(await ctx.service.list(ctxMember)).toHaveLength(0);
+
+    await ctx.service.setVisibility(ctxA, income.id, 'tenant');
+    expect((await ctx.service.getById(ctxMember, income.id)).id).toBe(income.id);
+    expect(await ctx.service.list(ctxMember)).toHaveLength(1);
   });
 });
 

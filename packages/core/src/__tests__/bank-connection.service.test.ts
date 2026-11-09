@@ -10,8 +10,8 @@ import {
   SequentialIdGenerator,
 } from './fakes.js';
 
-const ctxA = { userId: 'user-a', tenantId: 'tenant-a' };
-const ctxB = { userId: 'user-b', tenantId: 'tenant-b' };
+const ctxA = { userId: 'user-a', tenantId: 'tenant-a', role: 'owner' as const };
+const ctxB = { userId: 'user-b', tenantId: 'tenant-b', role: 'owner' as const };
 
 function buildService() {
   const bankingProvider = new FakeBankingProvider();

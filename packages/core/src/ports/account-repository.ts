@@ -1,4 +1,5 @@
 import type { Account, AccountType } from '../domain/entities/account.js';
+import type { Visibility } from '../domain/entities/visibility.js';
 
 export interface NewAccount {
   id: string;
@@ -24,6 +25,8 @@ export interface AccountPatch {
   institutionName?: string;
   currency?: string;
   description?: string;
+  visibility?: Visibility;
+  sharedWithUserIds?: string[];
   updatedAt: string;
 }
 

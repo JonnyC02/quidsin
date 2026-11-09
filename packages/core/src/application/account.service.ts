@@ -1,8 +1,10 @@
 import type { Account, AccountType } from '../domain/entities/account.js';
+import type { Visibility } from '../domain/entities/visibility.js';
 import type { AccountRepository } from '../ports/account-repository.js';
 import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
 import { NotFoundError } from '../domain/errors.js';
+import { canView } from '../domain/visibility-rules.js';
 import type { AuthContext } from './auth-context.js';
 
 export interface AccountServiceDeps {
@@ -50,7 +52,7 @@ export class AccountService {
   }
 
   async update(ctx: AuthContext, id: string, input: UpdateAccountInput): Promise<Account> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
 
     return this.deps.repository.update(ctx.tenantId, id, {
       ...input,
@@ -59,7 +61,7 @@ export class AccountService {
   }
 
   async updateBalance(ctx: AuthContext, id: string, balanceMinorUnits: number): Promise<Account> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
 
     return this.deps.repository.updateBalance(
       ctx.tenantId,
@@ -70,15 +72,44 @@ export class AccountService {
   }
 
   async remove(ctx: AuthContext, id: string): Promise<void> {
-    await this.getById(ctx, id);
+    await this.getOwned(ctx, id);
     await this.deps.repository.remove(ctx.tenantId, id);
   }
 
-  async list(ctx: AuthContext): Promise<Account[]> {
-    return this.deps.repository.list(ctx.tenantId);
+  /** Not even the tenant Owner can change another member's account's visibility. */
+  async setVisibility(
+    ctx: AuthContext,
+    id: string,
+    visibility: Visibility,
+    sharedWithUserIds?: string[],
+  ): Promise<Account> {
+    await this.getOwned(ctx, id);
+
+    return this.deps.repository.update(ctx.tenantId, id, {
+      visibility,
+      sharedWithUserIds: visibility === 'shared' ? sharedWithUserIds : undefined,
+      updatedAt: this.deps.clock.now().toISOString(),
+    });
   }
 
+  async list(ctx: AuthContext): Promise<Account[]> {
+    const accounts = await this.deps.repository.list(ctx.tenantId);
+    return accounts.filter((account) => canView(account, ctx));
+  }
+
+  /** A read — respects visibility, not strict ownership. */
   async getById(ctx: AuthContext, id: string): Promise<Account> {
+    const account = await this.deps.repository.getById(ctx.tenantId, id);
+
+    if (!account || !canView(account, ctx)) {
+      throw new NotFoundError();
+    }
+
+    return account;
+  }
+
+  /** Strict ownership — used internally to gate mutation, regardless of visibility. */
+  private async getOwned(ctx: AuthContext, id: string): Promise<Account> {
     const account = await this.deps.repository.getById(ctx.tenantId, id);
 
     if (!account || account.ownerId !== ctx.userId) {

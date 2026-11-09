@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import type { AuthService } from '@quidsin/core';
+import type { AuthService, TenantRepository } from '@quidsin/core';
 import { asyncHandler } from '../middleware/async-handler.js';
 import { parseOrThrow } from '../middleware/validate.js';
 import { requireAuth, SESSION_COOKIE_NAME } from '../middleware/require-auth.js';
@@ -9,6 +9,7 @@ const googleSignInSchema = z.object({ idToken: z.string().min(1) });
 
 export interface AuthRoutesDeps {
   authService: AuthService;
+  tenantRepository: TenantRepository;
   sessionCookieSecure: boolean;
 }
 
@@ -39,6 +40,21 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Router {
     }),
   );
 
+  router.get(
+    '/me',
+    requireAuth(deps.authService),
+    asyncHandler(async (req, res) => {
+      const ctx = req.authContext!;
+      const tenant = await deps.tenantRepository.findById(ctx.tenantId);
+      res.json({
+        userId: ctx.userId,
+        tenantId: ctx.tenantId,
+        tenantName: tenant?.name,
+        role: ctx.role,
+      });
+    }),
+  );
+
   router.post(
     '/logout',
     requireAuth(deps.authService),
@@ -49,17 +65,6 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Router {
       }
       res.clearCookie(SESSION_COOKIE_NAME);
       res.status(204).send();
-    }),
-  );
-
-  router.get(
-    '/me',
-    requireAuth(deps.authService),
-    asyncHandler(async (req, res) => {
-      // authContext only carries ids; re-resolve nothing more is needed
-      // here since the frontend only needs to know it's authenticated and
-      // which tenant it's scoped to.
-      res.json({ userId: req.authContext!.userId, tenantId: req.authContext!.tenantId });
     }),
   );
 

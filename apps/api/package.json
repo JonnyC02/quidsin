@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@quidsin/banking": "*",
     "@quidsin/config": "*",
     "@quidsin/core": "*",
     "@quidsin/database": "*",

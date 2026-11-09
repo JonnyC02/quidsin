@@ -1,8 +1,9 @@
 # Getting started
 
 QuidsIn is a monorepo managed with npm workspaces. This covers Phase 1
-(foundation) and Phase 2 (core financial functionality): authentication,
-income, recurring expenses, accounts, and the dashboard.
+(foundation), Phase 2 (core financial functionality: authentication, income,
+recurring expenses, accounts, and the dashboard), and Phase 3 (optional
+Plaid bank connections and transaction sync).
 
 ## Prerequisites
 
@@ -10,6 +11,9 @@ income, recurring expenses, accounts, and the dashboard.
 - Docker and Docker Compose
 - A Google OAuth Client ID — see "Setting up Google Sign-In" below. The API
   won't start without `GOOGLE_CLIENT_ID` configured.
+- A Plaid Client ID and secret (free sandbox tier) — see "Setting up Plaid
+  (sandbox)" below. The API and worker won't start without `PLAID_CLIENT_ID`,
+  `PLAID_SECRET`, and `ENCRYPTION_KEY` configured.
 
 ## Setting up Google Sign-In
 
@@ -36,22 +40,62 @@ This is a deliberate architectural choice, not a limitation of this
 release — see `IMPLEMENTATION_STATUS.md` for the reasoning and the
 trade-off it makes for self-hosted deployments.
 
+## Setting up Plaid (sandbox)
+
+Bank connections are optional — everything else in QuidsIn (manual
+accounts, income, expenses, the dashboard) works without Plaid configured
+at all. But the API and worker both fail to start without the env vars
+below, since Plaid support isn't feature-flagged off; set them even if
+you don't plan to connect a real bank yet.
+
+1. Sign up at [dashboard.plaid.com](https://dashboard.plaid.com/signup) —
+   the **Sandbox** environment is free and needs no approval.
+2. From **Team Settings → Keys**, copy your `client_id` and the
+   **Sandbox** `secret`. Set these as `PLAID_CLIENT_ID` and `PLAID_SECRET`.
+3. Generate a local encryption key for Plaid access tokens at rest:
+   `openssl rand -base64 32`. Set this as `ENCRYPTION_KEY`. This is
+   separate from any Plaid credential — it's generated locally, never
+   sent to Plaid, and protects tokens stored in your own database.
+4. Leave `PLAID_WEBHOOK_URL` unset for local development — Plaid webhooks
+   need a real public URL to reach you, which `localhost` isn't. Without
+   it, Link is created without a webhook and the "Sync now" button (on
+   the Accounts page) drives syncing instead. Set it only once you have a
+   real public URL (e.g. a deployed environment, or a tunnel like ngrok)
+   pointing at `POST /plaid/webhook`.
+5. `PLAID_ENV` defaults to `sandbox` and `PLAID_COUNTRY_CODES` to `GB` —
+   override the latter (comma-separated ISO-3166-1 alpha-2 codes, e.g.
+   `GB,US`) if you want Link to show institutions from other countries.
+
+A real end-to-end bank-connection test — completing Plaid Link against a
+sandbox institution, the public-token exchange, a real sync populating the
+Transactions page, disconnecting a connection — needs your own Plaid
+sandbox credentials and can't be faked. Everything else (tests, typecheck,
+build, and even the sync/queue logic itself, which is tested against a
+fake banking provider) is fully verifiable without them.
+
 ## Option A: Docker Compose (recommended)
 
-Set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` in your shell (or in a
-`.env` file next to `deploy/docker/docker-compose.yml`), then bring up
-DynamoDB Local, the API, the worker, and the web app together:
+Set `GOOGLE_CLIENT_ID`, `VITE_GOOGLE_CLIENT_ID`, `PLAID_CLIENT_ID`,
+`PLAID_SECRET`, and `ENCRYPTION_KEY` in your shell (or in a `.env` file next
+to `deploy/docker/docker-compose.yml`), then bring up DynamoDB Local, the
+API, the worker, and the web app together:
 
 ```sh
 export GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 export VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+export PLAID_CLIENT_ID=your-plaid-sandbox-client-id
+export PLAID_SECRET=your-plaid-sandbox-secret
+export ENCRYPTION_KEY=$(openssl rand -base64 32)
 docker compose -f deploy/docker/docker-compose.yml up
 ```
 
 Once all services report healthy (`docker compose -f deploy/docker/docker-compose.yml ps`):
 
 - Web: http://localhost:5173 — sign in with Google, then add income,
-  recurring expenses, and accounts from the navigation.
+  recurring expenses, and accounts from the navigation. From the Accounts
+  page, "Connect a bank" starts the Plaid Link flow; linked accounts get
+  "Sync now" and "Disconnect" buttons, and their transactions show up on
+  the Transactions page once synced.
 - API health: http://localhost:3001/health
 - API readiness (checks DynamoDB): http://localhost:3001/health/ready
 - DynamoDB Local: http://localhost:8000
@@ -76,11 +120,13 @@ older server versions don't understand. `docker-compose.yml` pins `3.3.2`.
 
 ## Option B: local processes (without Docker)
 
-1. Copy `.env.example` to `.env` and set `GOOGLE_CLIENT_ID` to a real value
-   (see "Setting up Google Sign-In" above) — the API fails to start
-   without it, the same way it already does for `DYNAMODB_ENDPOINT`. Also
-   copy `apps/web/.env.example` to `apps/web/.env` and set
-   `VITE_GOOGLE_CLIENT_ID` to the same Client ID.
+1. Copy `.env.example` to `.env` and set `GOOGLE_CLIENT_ID`,
+   `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `ENCRYPTION_KEY` to real values
+   (see "Setting up Google Sign-In" and "Setting up Plaid (sandbox)"
+   above) — the API and worker fail to start without them, the same way
+   they already do for `DYNAMODB_ENDPOINT`. Also copy
+   `apps/web/.env.example` to `apps/web/.env` and set
+   `VITE_GOOGLE_CLIENT_ID` to the same Google Client ID.
 2. Start DynamoDB Local yourself (e.g. via Docker: `docker run -p 8000:8000 amazon/dynamodb-local:3.3.2`).
 3. Install dependencies: `npm install`
 4. Run everything: `npm run dev`

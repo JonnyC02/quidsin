@@ -9,6 +9,8 @@ export type { RecurringMoneyItem } from './domain/entities/recurring-money-item.
 export type { IncomeSource } from './domain/entities/income.js';
 export type { RecurringExpense } from './domain/entities/expense.js';
 export type { Account, AccountType } from './domain/entities/account.js';
+export type { PlaidItem, PlaidItemStatus, EncryptedPayload } from './domain/entities/plaid-item.js';
+export type { Transaction } from './domain/entities/transaction.js';
 
 // Domain errors
 export {
@@ -45,6 +47,22 @@ export type { ExpenseRepository } from './ports/expense-repository.js';
 export type { AccountRepository, NewAccount, AccountPatch } from './ports/account-repository.js';
 export { type Clock, SystemClock } from './ports/clock.js';
 export { type IdGenerator, RandomUuidGenerator } from './ports/id-generator.js';
+export type {
+  BankingProvider,
+  LinkTokenRequest,
+  PlaidAccountInfo,
+  ExchangeResult,
+  PlaidTransactionData,
+  SyncPage,
+} from './ports/banking-provider.js';
+export { type EncryptionService, AesGcmEncryptionService } from './ports/encryption-service.js';
+export type { JobQueue, SyncJob } from './ports/job-queue.js';
+export type { PlaidItemRepository, NewPlaidItem } from './ports/plaid-item-repository.js';
+export type {
+  TransactionRepository,
+  NewTransaction,
+  TransactionFilter,
+} from './ports/transaction-repository.js';
 
 // Application services
 export type { AuthContext } from './application/auth-context.js';
@@ -74,3 +92,19 @@ export {
   type DashboardSummary,
   type UpcomingPayment,
 } from './application/dashboard.service.js';
+export {
+  BankConnectionService,
+  type BankConnectionServiceDeps,
+  type BankConnectionServiceConfig,
+} from './application/bank-connection.service.js';
+export {
+  TransactionSyncService,
+  type TransactionSyncServiceDeps,
+  type SyncJobInput,
+} from './application/transaction-sync.service.js';
+export { TransactionService, type TransactionServiceDeps } from './application/transaction.service.js';
+export {
+  PlaidWebhookService,
+  type PlaidWebhookServiceDeps,
+  type PlaidWebhookPayload,
+} from './application/plaid-webhook.service.js';

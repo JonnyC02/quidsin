@@ -2,10 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { createDocumentClient, createDynamoDbClient, ensureTableExists } from '../index.js';
 import {
   DynamoAccountRepository,
+  DynamoDbJobQueue,
   DynamoExpenseRepository,
   DynamoIncomeRepository,
+  DynamoPlaidItemRepository,
   DynamoSessionRepository,
   DynamoTenantRepository,
+  DynamoTransactionRepository,
   DynamoUserRepository,
 } from '../index.js';
 
@@ -41,5 +44,8 @@ export async function setUpTestTable(prefix: string) {
     incomeRepository: new DynamoIncomeRepository(docClient, tableName),
     expenseRepository: new DynamoExpenseRepository(docClient, tableName),
     accountRepository: new DynamoAccountRepository(docClient, tableName),
+    plaidItemRepository: new DynamoPlaidItemRepository(docClient, tableName),
+    transactionRepository: new DynamoTransactionRepository(docClient, tableName),
+    jobQueue: new DynamoDbJobQueue(docClient, tableName),
   };
 }

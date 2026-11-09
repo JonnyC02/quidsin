@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AuthService, InvalidCredentialsError } from '../index.js';
 import {
+  FakeBankingProvider,
   FakeGoogleIdentityVerifier,
   FixedClock,
   InMemoryAccountRepository,
+  InMemoryEncryptionService,
+  InMemoryPlaidItemRepository,
   InMemoryRecurringMoneyItemRepository,
   InMemorySessionRepository,
+  InMemoryTransactionRepository,
   InMemoryUserRepository,
   SequentialIdGenerator,
 } from './fakes.js';
@@ -27,6 +31,10 @@ function buildAuthService() {
   const incomeRepository = new InMemoryRecurringMoneyItemRepository<IncomeSource>();
   const expenseRepository = new InMemoryRecurringMoneyItemRepository<RecurringExpense>();
   const accountRepository = new InMemoryAccountRepository();
+  const plaidItemRepository = new InMemoryPlaidItemRepository();
+  const transactionRepository = new InMemoryTransactionRepository();
+  const bankingProvider = new FakeBankingProvider();
+  const encryptionService = new InMemoryEncryptionService();
 
   const service = new AuthService({
     userRepository,
@@ -35,12 +43,25 @@ function buildAuthService() {
     incomeRepository,
     expenseRepository,
     accountRepository,
+    plaidItemRepository,
+    transactionRepository,
+    bankingProvider,
+    encryptionService,
     clock,
     idGenerator: new SequentialIdGenerator(),
     config: { sessionDurationHours: 168 },
   });
 
-  return { service, clock, googleIdentityVerifier, sessionRepository, userRepository };
+  return {
+    service,
+    clock,
+    googleIdentityVerifier,
+    sessionRepository,
+    userRepository,
+    plaidItemRepository,
+    bankingProvider,
+    encryptionService,
+  };
 }
 
 describe('AuthService', () => {
@@ -118,5 +139,26 @@ describe('AuthService', () => {
     const resignedIn = await ctx.service.signInWithGoogle('tok-jonny');
     expect(resignedIn.user.id).toBe(user.id); // same Google sub
     expect(resignedIn.tenant.id).not.toBe(tenant.id); // fresh tenant
+  });
+
+  it('revokes every Plaid item and removes them on account deletion', async () => {
+    const { user, tenant } = await ctx.service.signInWithGoogle('tok-jonny');
+    ctx.bankingProvider.seedExchange('pub-tok', {
+      accessToken: 'access-token-1',
+      plaidItemId: 'item-1',
+    });
+    await ctx.plaidItemRepository.create({
+      id: 'item-1',
+      tenantId: tenant.id,
+      ownerId: user.id,
+      encryptedAccessToken: await ctx.encryptionService.encrypt('access-token-1'),
+      createdAt: ctx.clock.now().toISOString(),
+      updatedAt: ctx.clock.now().toISOString(),
+    });
+
+    await ctx.service.deleteAccount({ userId: user.id, tenantId: tenant.id });
+
+    expect(ctx.bankingProvider.removedAccessTokens).toContain('access-token-1');
+    expect(await ctx.plaidItemRepository.list(tenant.id)).toHaveLength(0);
   });
 });

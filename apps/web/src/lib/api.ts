@@ -5,6 +5,7 @@ import type {
   Frequency,
   IncomeSource,
   RecurringExpense,
+  Transaction,
 } from '@quidsin/core';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3001';
@@ -172,3 +173,49 @@ export const accounts = {
 export function getDashboardSummary(): Promise<DashboardSummary> {
   return request('/dashboard');
 }
+
+// --- Plaid bank connections --------------------------------------------
+
+export const plaid = {
+  createLinkToken: () => request<{ linkToken: string }>('/plaid/link-token', { method: 'POST' }),
+  exchangePublicToken: (publicToken: string) =>
+    request<{ accounts: Account[] }>('/plaid/exchange', {
+      method: 'POST',
+      body: JSON.stringify({ publicToken }),
+    }).then((r) => r.accounts),
+  disconnectItem: (plaidItemId: string) =>
+    request<void>(`/plaid/items/${plaidItemId}/disconnect`, { method: 'POST' }),
+  triggerSync: (plaidItemId: string) =>
+    request<void>(`/plaid/items/${plaidItemId}/sync`, { method: 'POST' }),
+};
+
+// --- Transactions --------------------------------------------------------
+
+export interface TransactionFilter {
+  accountId?: string;
+  search?: string;
+  startDate?: string;
+  endDate?: string;
+  pending?: boolean;
+}
+
+export const transactions = {
+  list: (filter?: TransactionFilter) => {
+    const query = new URLSearchParams();
+    if (filter?.accountId) query.set('accountId', filter.accountId);
+    if (filter?.search) query.set('search', filter.search);
+    if (filter?.startDate) query.set('startDate', filter.startDate);
+    if (filter?.endDate) query.set('endDate', filter.endDate);
+    if (filter?.pending !== undefined) query.set('pending', String(filter.pending));
+    const queryString = query.toString();
+
+    return request<{ transactions: Transaction[] }>(
+      `/transactions${queryString ? `?${queryString}` : ''}`,
+    ).then((r) => r.transactions);
+  },
+  updateNotes: (id: string, notes: string) =>
+    request<{ transaction: Transaction }>(`/transactions/${id}/notes`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes }),
+    }).then((r) => r.transaction),
+};

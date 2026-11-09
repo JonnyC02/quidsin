@@ -10,6 +10,10 @@ export interface NewAccount {
   currency: string;
   balanceMinorUnits: number;
   description?: string;
+  /** Defaults to true (manual) when omitted — only Plaid provisioning sets this to false. */
+  isManual?: boolean;
+  plaidItemId?: string;
+  plaidAccountId?: string;
   createdAt: string;
   updatedAt: string;
 }

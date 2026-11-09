@@ -16,6 +16,9 @@ RUN npm ci
 
 COPY packages/shared packages/shared
 COPY packages/config packages/config
+COPY packages/database packages/database
+COPY packages/core packages/core
+COPY packages/banking packages/banking
 COPY apps/worker apps/worker
 
 RUN npx tsc -b apps/worker --force
@@ -30,6 +33,12 @@ COPY --from=build /repo/packages/shared/package.json packages/shared/package.jso
 COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/packages/config/package.json packages/config/package.json
 COPY --from=build /repo/packages/config/dist packages/config/dist
+COPY --from=build /repo/packages/core/package.json packages/core/package.json
+COPY --from=build /repo/packages/core/dist packages/core/dist
+COPY --from=build /repo/packages/database/package.json packages/database/package.json
+COPY --from=build /repo/packages/database/dist packages/database/dist
+COPY --from=build /repo/packages/banking/package.json packages/banking/package.json
+COPY --from=build /repo/packages/banking/dist packages/banking/dist
 COPY --from=build /repo/apps/worker/package.json apps/worker/package.json
 COPY --from=build /repo/apps/worker/dist apps/worker/dist
 

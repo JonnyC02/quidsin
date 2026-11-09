@@ -22,7 +22,7 @@ export class DynamoAccountRepository implements AccountRepository {
     const record: Account = {
       ...account,
       visibility: 'private',
-      isManual: true,
+      isManual: account.isManual ?? true,
       balanceUpdatedAt: account.updatedAt,
     };
 

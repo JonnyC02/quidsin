@@ -26,6 +26,16 @@ export const keys = {
     pk: `TENANT#${tenantId}`,
     sk: `ACCOUNT#${id}`,
   }),
+  plaidItem: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `PLAID_ITEM#${id}`,
+  }),
+  transaction: (tenantId: string, id: string): PrimaryKey => ({
+    pk: `TENANT#${tenantId}`,
+    sk: `TRANSACTION#${id}`,
+  }),
+  /** The entire sync queue lives in one partition — always small at this app's scale. */
+  job: (plaidItemId: string): PrimaryKey => ({ pk: 'QUEUE#SYNC', sk: `JOB#${plaidItemId}` }),
   tenantPrefix: (tenantId: string): string => `TENANT#${tenantId}`,
 } as const;
 
@@ -35,6 +45,15 @@ export const gsi1 = {
     gsi1sk: `SESSION#${sessionId}`,
   }),
   userPrefix: (userId: string): string => `USER#${userId}`,
+  /**
+   * A second, non-colliding lookup pattern reusing the existing GSI1
+   * rather than adding a new index — webhooks only carry Plaid's own
+   * item_id, never our tenantId, so this is the only way to resolve one.
+   */
+  plaidItemByPlaidId: (plaidItemId: string): Gsi1Key => ({
+    gsi1pk: `PLAID_ITEM#${plaidItemId}`,
+    gsi1sk: `PLAID_ITEM#${plaidItemId}`,
+  }),
 } as const;
 
 /** Internal DynamoDB item attributes that must never leak into a domain entity. */

@@ -22,6 +22,26 @@ export const configSchema = z.object({
   SESSION_COOKIE_SECURE: booleanString('false'),
 
   GOOGLE_CLIENT_ID: z.string().min(1),
+
+  PLAID_CLIENT_ID: z.string().min(1),
+  PLAID_SECRET: z.string().min(1),
+  PLAID_ENV: z.enum(['sandbox', 'production']).default('sandbox'),
+  PLAID_COUNTRY_CODES: z.string().min(1).default('GB'),
+  // An unset env var is undefined, but a `KEY=` line in a .env file (as in
+  // .env.example) sets it to an empty string — treat both as "absent".
+  PLAID_WEBHOOK_URL: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.string().url().optional(),
+  ),
+  ENCRYPTION_KEY: z
+    .string()
+    .min(1)
+    .refine(
+      (value) => Buffer.from(value, 'base64').length === 32,
+      'ENCRYPTION_KEY must be a base64-encoded 32-byte key — generate one with `openssl rand -base64 32`',
+    ),
+  QUEUE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
+  QUEUE_LEASE_DURATION_MS: z.coerce.number().int().positive().default(60000),
 });
 
 export type Config = z.infer<typeof configSchema>;

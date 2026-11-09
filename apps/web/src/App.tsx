@@ -8,6 +8,7 @@ import { OverviewPage } from './pages/OverviewPage.js';
 import { IncomePage } from './pages/IncomePage.js';
 import { ExpensesPage } from './pages/ExpensesPage.js';
 import { AccountsPage } from './pages/AccountsPage.js';
+import { TransactionsPage } from './pages/TransactionsPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 
 function App() {
@@ -27,6 +28,7 @@ function App() {
           <Route path="/income" element={<IncomePage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/accounts" element={<AccountsPage />} />
+          <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Route>

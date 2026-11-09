@@ -1,10 +1,54 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePlaidLink } from 'react-plaid-link';
 import { parseAmountToMinorUnits } from '@quidsin/shared';
-import { accounts } from '../lib/api.js';
+import { accounts, plaid } from '../lib/api.js';
 import { MoneyAmount } from '../components/MoneyAmount.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { AccountForm } from '../components/forms/AccountForm.js';
+
+function ConnectBankButton({ onLinked }: { onLinked: () => void }) {
+  const [linkToken, setLinkToken] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+
+  const { open, ready } = usePlaidLink({
+    token: linkToken,
+    onSuccess: (publicToken) => {
+      setLinkToken(null);
+      if (publicToken) {
+        void plaid.exchangePublicToken(publicToken).then(onLinked);
+      }
+    },
+    onExit: () => setLinkToken(null),
+  });
+
+  useEffect(() => {
+    if (linkToken && ready) {
+      open();
+    }
+  }, [linkToken, ready, open]);
+
+  async function startConnect() {
+    setIsStarting(true);
+    try {
+      const { linkToken: token } = await plaid.createLinkToken();
+      setLinkToken(token);
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void startConnect()}
+      disabled={isStarting}
+      className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+    >
+      {isStarting ? 'Connecting…' : 'Connect a bank'}
+    </button>
+  );
+}
 
 export function AccountsPage() {
   const queryClient = useQueryClient();
@@ -22,6 +66,13 @@ export function AccountsPage() {
     onSuccess: invalidate,
   });
   const removeMutation = useMutation({ mutationFn: accounts.remove, onSuccess: invalidate });
+  const disconnectMutation = useMutation({ mutationFn: plaid.disconnectItem, onSuccess: invalidate });
+  const [syncingItemId, setSyncingItemId] = useState<string | null>(null);
+  const syncMutation = useMutation({
+    mutationFn: plaid.triggerSync,
+    onMutate: (plaidItemId) => setSyncingItemId(plaidItemId),
+    onSettled: () => setSyncingItemId(null),
+  });
 
   const items = accountsQuery.data ?? [];
 
@@ -30,7 +81,15 @@ export function AccountsPage() {
       <h1 className="text-xl font-semibold text-slate-900">Accounts</h1>
 
       <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">Add new</h2>
+        <h2 className="mb-4 text-sm font-semibold text-slate-700">Connect a bank</h2>
+        <p className="mb-4 text-sm text-slate-500">
+          Link a bank account via Plaid to sync balances and transactions automatically.
+        </p>
+        <ConnectBankButton onLinked={invalidate} />
+      </section>
+
+      <section className="rounded-lg border border-slate-200 bg-white p-6">
+        <h2 className="mb-4 text-sm font-semibold text-slate-700">Add a manual account</h2>
         <AccountForm onSubmit={(input) => createMutation.mutateAsync(input)} />
       </section>
 
@@ -39,14 +98,21 @@ export function AccountsPage() {
       ) : items.length === 0 ? (
         <EmptyState
           title="No accounts yet"
-          description="Add your current account, savings, or anything else you want to track the balance of. All accounts are manual until bank connections arrive in a later release."
+          description="Connect a bank via Plaid, or add a manual account for anything else you want to track the balance of."
         />
       ) : (
         <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
           {items.map((account) => (
             <li key={account.id} className="flex items-center justify-between gap-4 p-4">
               <div>
-                <p className="font-medium text-slate-900">{account.name}</p>
+                <p className="font-medium text-slate-900">
+                  {account.name}
+                  {!account.isManual && (
+                    <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                      Linked via Plaid
+                    </span>
+                  )}
+                </p>
                 <p className="text-sm text-slate-500">
                   {account.institutionName ? `${account.institutionName} · ` : ''}
                   <MoneyAmount
@@ -56,31 +122,62 @@ export function AccountsPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="New balance"
-                  value={balanceDrafts[account.id] ?? ''}
-                  onChange={(e) =>
-                    setBalanceDrafts({ ...balanceDrafts, [account.id]: e.target.value })
-                  }
-                  className="w-28 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-slate-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const draft = balanceDrafts[account.id];
-                    const balanceMinorUnits = draft ? parseAmountToMinorUnits(draft) : null;
-                    if (balanceMinorUnits === null) {
-                      return;
-                    }
-                    updateBalanceMutation.mutate({ id: account.id, balanceMinorUnits });
-                    setBalanceDrafts({ ...balanceDrafts, [account.id]: '' });
-                  }}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Update balance
-                </button>
+                {account.isManual ? (
+                  <>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="New balance"
+                      value={balanceDrafts[account.id] ?? ''}
+                      onChange={(e) =>
+                        setBalanceDrafts({ ...balanceDrafts, [account.id]: e.target.value })
+                      }
+                      className="w-28 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-slate-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const draft = balanceDrafts[account.id];
+                        const balanceMinorUnits = draft ? parseAmountToMinorUnits(draft) : null;
+                        if (balanceMinorUnits === null) {
+                          return;
+                        }
+                        updateBalanceMutation.mutate({ id: account.id, balanceMinorUnits });
+                        setBalanceDrafts({ ...balanceDrafts, [account.id]: '' });
+                      }}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+                    >
+                      Update balance
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      disabled={syncingItemId === account.plaidItemId}
+                      onClick={() => account.plaidItemId && syncMutation.mutate(account.plaidItemId)}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {syncingItemId === account.plaidItemId ? 'Syncing…' : 'Sync now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          account.plaidItemId &&
+                          window.confirm(
+                            `Disconnect "${account.name}"? Its transaction history will be kept, but it will stop syncing.`,
+                          )
+                        ) {
+                          disconnectMutation.mutate(account.plaidItemId);
+                        }
+                      }}
+                      className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                    >
+                      Disconnect
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => {

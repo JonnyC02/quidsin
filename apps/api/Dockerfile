@@ -37,6 +37,8 @@ COPY --from=build /repo/packages/core/package.json packages/core/package.json
 COPY --from=build /repo/packages/core/dist packages/core/dist
 COPY --from=build /repo/packages/database/package.json packages/database/package.json
 COPY --from=build /repo/packages/database/dist packages/database/dist
+COPY --from=build /repo/packages/banking/package.json packages/banking/package.json
+COPY --from=build /repo/packages/banking/dist packages/banking/dist
 COPY --from=build /repo/apps/api/package.json apps/api/package.json
 COPY --from=build /repo/apps/api/dist apps/api/dist
 

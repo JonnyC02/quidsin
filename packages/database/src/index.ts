@@ -21,3 +21,6 @@ export { DynamoSessionRepository } from './repositories/session.repository.js';
 export { DynamoIncomeRepository } from './repositories/income.repository.js';
 export { DynamoExpenseRepository } from './repositories/expense.repository.js';
 export { DynamoAccountRepository } from './repositories/account.repository.js';
+export { DynamoPlaidItemRepository } from './repositories/plaid-item.repository.js';
+export { DynamoTransactionRepository } from './repositories/transaction.repository.js';
+export { DynamoDbJobQueue } from './adapters/dynamodb-job-queue.adapter.js';

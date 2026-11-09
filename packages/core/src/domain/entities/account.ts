@@ -14,8 +14,12 @@ export interface Account {
   currency: string;
   balanceMinorUnits: number;
   description?: string;
-  /** Always true in Phase 2 — connected (Plaid) accounts land in Phase 3. */
-  isManual: true;
+  /** false = Plaid-linked (plaidItemId/plaidAccountId are then both present). */
+  isManual: boolean;
+  /** Present iff isManual === false. */
+  plaidItemId?: string;
+  /** Present iff isManual === false. */
+  plaidAccountId?: string;
   balanceUpdatedAt: string;
   createdAt: string;
   updatedAt: string;

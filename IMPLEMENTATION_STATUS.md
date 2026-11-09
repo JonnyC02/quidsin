@@ -2,10 +2,10 @@
 
 ## Current phase
 
-**Phase 2 — Core Financial Functionality: complete.** Authentication was
-subsequently replaced with Google Sign-In (see "Authentication replaced
-with Google Sign-In" below) — this superseded Phase 2's original
-password-based auth before Phase 3 began.
+**Phase 3 — Plaid Bank Connections & Transaction Sync: complete.**
+Authentication was replaced with Google Sign-In between Phase 2 and
+Phase 3 (see "Authentication replaced with Google Sign-In" below) — this
+superseded Phase 2's original password-based auth before Phase 3 began.
 
 ## Completed functionality
 
@@ -65,6 +65,57 @@ actually happened). (Originally verified against password-based
 register/login/password-reset before the Google Sign-In replacement; see
 below for the current auth flow's own verification.)
 
+### Phase 3 — Plaid Bank Connections & Transaction Sync
+
+- **Bank connections** (`packages/core/src/application/bank-connection.service.ts`):
+  `createLinkToken`/`exchangePublicToken` (exchange → encrypt the access
+  token → create a `PlaidItem` → `getAccounts` → create linked `Account`
+  rows with `isManual: false` → enqueue an initial sync),
+  `disconnectItem` (best-effort token revocation, item marked
+  `disconnected`, **accounts and transactions are kept, never deleted**),
+  `triggerSync` (the self-hosted "Sync now" button — works without a
+  public webhook URL).
+- **Transaction sync** (`transaction-sync.service.ts`): runs in the
+  worker's poll loop, not inline on a webhook request. Loops
+  `BankingProvider.syncTransactions` pages, upserts added/modified
+  transactions, removes removed ones, and **advances the stored cursor
+  only after each page's writes are fully persisted**.
+- **Transactions** (`transaction.service.ts`): list with filters
+  (account/date-range/pending/search), notes editing.
+- **Plaid webhooks** (`plaid-webhook.service.ts`): signature verification
+  (ES256 JWT via `jose`, matching the `request_body_sha256` claim against
+  the actual raw body) and payload handling — **tenantId is always
+  resolved from our own stored `PlaidItem`, never trusted from the
+  webhook payload**, which only ever supplies Plaid's own `item_id`.
+- **`packages/banking`**: the only place the real `plaid` npm package
+  (v51 — a namespaced `PlaidClient` with `.link`/`.item`/`.transactions`/
+  `.accounts`/`.webhook` sub-clients, not the older flat-method
+  `plaid-node` API) is imported. `PlaidBankingProvider implements
+  BankingProvider`.
+- **DynamoDB-backed job queue** (`DynamoDbJobQueue`): conditional-write
+  enqueue coalescing (duplicate webhook deliveries for the same item
+  become a no-op) and an SQS-style visibility-timeout claim, entirely
+  within one partition (`pk = 'QUEUE#SYNC'`).
+- **`apps/worker`** went from a health-check-only stub to a real poll
+  loop: `claimNext` → `processItem` → `complete`/`fail`, with `/health`
+  now reflecting actual poll-loop liveness (healthy only if a poll
+  completed within the last two poll intervals) rather than just "process
+  is up."
+- **`apps/web`**: "Connect a bank" (via `react-plaid-link`), "Sync now"
+  and "Disconnect" on linked accounts, and a new Transactions page with
+  account/search/date-range/pending filters and inline notes editing.
+
+End-to-end verified without real Plaid credentials: full test suite
+(including live-DynamoDB tests proving the idempotent-upsert and
+concurrent-claim guarantees) green, typecheck, lint, and build all green
+across every affected package/app; the worker's poll loop verified live
+against DynamoDB Local — `/health` goes healthy and a manually-inserted
+queue row is claimed and completed within one poll interval. A real
+end-to-end bank-connection test (completing Plaid Link, a real sync,
+disconnecting a real connection) needs the user's own Plaid sandbox
+credentials and is intentionally left for them to run — see
+`docs/getting-started.md` ("Setting up Plaid (sandbox)").
+
 ## Authentication replaced with Google Sign-In
 
 Shortly after Phase 2 shipped, authentication was replaced entirely —
@@ -112,8 +163,6 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 3** — Plaid integration (`packages/banking` is an empty shell
-  waiting for this).
 - **Phase 4** — tenant membership (multiple users per tenant), record
   visibility _enforcement_ (`visibility` is a real attribute on every
   record already, but Phase 2 never sets it to anything but `"private"`
@@ -188,14 +237,47 @@ choice made after that trade-off was explained, not an oversight.
   `resolve.preserveSymlinks: true` in `apps/web/vite.config.ts`, which
   keeps Vite treating workspace packages as ordinary dependencies.
 
+### Phase 3
+
+- **The installed `plaid` npm package (v51) has a completely different
+  API shape from the classic `plaid-node` `Configuration`/`PlaidApi`
+  pattern** (flat, snake_case methods like `linkTokenCreate`) that most
+  existing Plaid integration examples assume. The real SDK exports a
+  single `PlaidClient` with namespaced sub-clients —
+  `client.link.createToken`, `client.item.exchangePublicToken`,
+  `client.item.remove`, `client.accounts.get`, `client.transactions.sync`,
+  `client.webhook.getVerificationKey` — each returning an
+  `HttpResponsePromise<T>` that resolves to the parsed body directly when
+  awaited (no `.data` unwrapping needed, unlike the older SDK). Found by
+  introspecting the installed package's actual `.d.ts` files rather than
+  trusting training-data familiarity with the older API; writing
+  `plaid-client.ts`/`plaid-banking-provider.ts` against the assumed-older
+  shape would have produced code that fails at runtime with no type error
+  (since nothing in `packages/core`'s tests exercises the real SDK — they
+  all use `FakeBankingProvider`).
+- **DynamoDB reserved keyword `cursor`.** `PlaidItemRepository.updateCursor`'s
+  `UpdateExpression: 'SET cursor = ...'` failed with `ValidationException:
+  ... reserved keyword: cursor`. Fixed via `ExpressionAttributeNames`
+  aliasing (`#cursor`). Caught only by the live-DynamoDB integration test,
+  not by `InMemoryPlaidItemRepository` — another case for why this
+  project tests against real DynamoDB Local rather than fakes alone
+  wherever correctness is safety-critical.
+- **An empty `PLAID_WEBHOOK_URL=` line (as `.env.example` produces when
+  copied verbatim) isn't `undefined`.** `z.string().url().optional()`
+  still runs the `.url()` check against an empty string and fails —
+  "optional" only covers the key being absent, not being present-but-empty.
+  Fixed with a `z.preprocess` step that treats `''` as `undefined` before
+  the rest of the schema sees it.
+
 ## Architectural decisions
 
 See the approved plans for full rationale; summarized:
 
 ### Phase 1
 
-- `packages/banking` is a real (but empty) package, to keep the workspace
-  list stable across phases without building banking functionality early.
+- `packages/banking` started as a real but empty package, to keep the
+  workspace list stable across phases without building banking
+  functionality early — filled in during Phase 3 (see below).
 - Web reaches the API via an explicit, browser-reachable
   `VITE_API_BASE_URL` (not the Docker-internal service name).
 - The worker's health check is a small HTTP endpoint plus a heartbeat
@@ -232,3 +314,43 @@ See the approved plans for full rationale; summarized:
   integer doesn't generalize to weekly/fortnightly cadences.
 - The dashboard's cash-flow visualization is a snapshot income-vs-expenses
   bar chart, not a time series, since Phase 2 has no transaction history.
+
+### Phase 3
+
+1. **Idempotent transaction upsert.** `Transaction.id = Plaid's
+   transaction_id` (same "external id is the id" pattern as
+   `User.id = Google sub`), with no date in the DynamoDB key. A Plaid
+   "modify" (which can change the date) becomes a plain `PutItem` at the
+   same key, never an orphan — proved by a live-DynamoDB test that
+   upserts, then upserts again with a different date and pending status,
+   and asserts exactly one row survives with the updated fields. Cost:
+   listing is a bounded `Query` + in-memory filter rather than a native
+   date-range query, same trade-off already accepted for Income/Expense.
+2. **Webhook → Item lookup via a second GSI1 prefix**, not a new index.
+   Webhooks only carry Plaid's own `item_id`; `gsi1pk = PLAID_ITEM#<id>`
+   reuses the existing `GSI1` with a non-colliding prefix, purely
+   additive — `ensureTableExists` needed no change.
+3. **Concurrent sync prevention, two layers.** `enqueueSync` is a
+   conditional `PutItem` that coalesces duplicate webhook deliveries for
+   the same item into a no-op; `claimNext` is an SQS-style conditional
+   claim with a visibility-timeout lease. Proved by a live-DynamoDB test
+   that fires two concurrent `claimNext` calls at one job and asserts
+   exactly one succeeds, plus a worker-level check (two worker processes
+   against one manually-inserted queue row) that only one claims it.
+4. **Disconnect retention.** Accounts and transactions are kept, never
+   deleted, when a bank is disconnected — only the token is revoked and
+   the item marked `disconnected`. Consistent with every other retention
+   choice in this app; nothing silently destroys financial history.
+5. **Local AES-256-GCM token encryption via `node:crypto` only** — no new
+   third-party crypto dependency, co-located in `packages/core` with its
+   port, exactly like `SystemClock`/`RandomUuidGenerator`. The AWS KMS
+   adapter (`apps/api/src/infra/kms-encryption.service.ts`) is an
+   unwired stub seam for Phase 5, mirroring `DynamoDbAwsAdapter`.
+6. **`packages/banking` is the only place the real `plaid` npm package is
+   imported** — `PlaidBankingProvider implements BankingProvider`,
+   mirroring how `packages/database` holds the real DynamoDB code behind
+   core's repository ports.
+7. **The job queue is DynamoDB-backed polling, not Redis/BullMQ** —
+   confirmed with the user specifically to avoid adding new required
+   infrastructure for self-hosters, mirroring the existing `Local`/`AWS`
+   adapter-pair pattern already used for the database.

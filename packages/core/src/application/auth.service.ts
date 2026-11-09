@@ -6,6 +6,10 @@ import type { IncomeRepository } from '../ports/income-repository.js';
 import type { ExpenseRepository } from '../ports/expense-repository.js';
 import type { AccountRepository } from '../ports/account-repository.js';
 import type { GoogleIdentityVerifier } from '../ports/google-identity.js';
+import type { BankingProvider } from '../ports/banking-provider.js';
+import type { EncryptionService } from '../ports/encryption-service.js';
+import type { PlaidItemRepository } from '../ports/plaid-item-repository.js';
+import type { TransactionRepository } from '../ports/transaction-repository.js';
 import type { Clock } from '../ports/clock.js';
 import type { IdGenerator } from '../ports/id-generator.js';
 import type { AuthContext } from './auth-context.js';
@@ -22,6 +26,10 @@ export interface AuthServiceDeps {
   incomeRepository: IncomeRepository;
   expenseRepository: ExpenseRepository;
   accountRepository: AccountRepository;
+  plaidItemRepository: PlaidItemRepository;
+  transactionRepository: TransactionRepository;
+  bankingProvider: BankingProvider;
+  encryptionService: EncryptionService;
   clock: Clock;
   idGenerator: IdGenerator;
   config: AuthServiceConfig;
@@ -92,6 +100,24 @@ export class AuthService {
 
   async deleteAccount(ctx: AuthContext): Promise<void> {
     await this.deps.sessionRepository.deleteAllForUser(ctx.userId);
+
+    const plaidItems = await this.deps.plaidItemRepository.list(ctx.tenantId);
+    for (const item of plaidItems) {
+      try {
+        const accessToken = await this.deps.encryptionService.decrypt(item.encryptedAccessToken);
+        await this.deps.bankingProvider.removeItem(accessToken);
+      } catch (error) {
+        // Best-effort — never block account deletion on Plaid's API being
+        // unavailable. Only the item id is logged, never the token.
+        console.error(
+          `[auth] Failed to revoke Plaid item ${item.id} during account deletion:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    await this.deps.plaidItemRepository.removeAllForTenant(ctx.tenantId);
+    await this.deps.transactionRepository.removeAllForTenant(ctx.tenantId);
+
     await this.deps.incomeRepository.removeAllForTenant(ctx.tenantId);
     await this.deps.expenseRepository.removeAllForTenant(ctx.tenantId);
     await this.deps.accountRepository.removeAllForTenant(ctx.tenantId);

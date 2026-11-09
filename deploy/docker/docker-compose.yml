@@ -38,6 +38,18 @@ services:
       # working committed default — supply it via a .env file next to
       # this compose file, or export it before `docker compose up`.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      # See docs/getting-started.md ("Setting up Plaid (sandbox)"). No
+      # working committed defaults — supply these the same way.
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID}
+      PLAID_SECRET: ${PLAID_SECRET}
+      PLAID_ENV: sandbox
+      PLAID_COUNTRY_CODES: GB
+      # Left unset — no public URL in local dev. Link is then created
+      # without a webhook, and the UI's "Sync now" button is used instead.
+      # Set this (and rebuild) only once you have a real public URL.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      QUEUE_POLL_INTERVAL_MS: '5000'
+      QUEUE_LEASE_DURATION_MS: '60000'
     depends_on:
       dynamodb-local:
         condition: service_healthy
@@ -60,6 +72,16 @@ services:
       DYNAMODB_REGION: local
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
+      # loadConfig() shares one schema across api/worker — the worker
+      # never uses GOOGLE_CLIENT_ID, but still has to pass validation.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      PLAID_CLIENT_ID: ${PLAID_CLIENT_ID}
+      PLAID_SECRET: ${PLAID_SECRET}
+      PLAID_ENV: sandbox
+      PLAID_COUNTRY_CODES: GB
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      QUEUE_POLL_INTERVAL_MS: '5000'
+      QUEUE_LEASE_DURATION_MS: '60000'
     depends_on:
       dynamodb-local:
         condition: service_healthy

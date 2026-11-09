@@ -10,6 +10,9 @@ const validEnv = {
   AWS_ACCESS_KEY_ID: 'local',
   AWS_SECRET_ACCESS_KEY: 'local',
   GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
+  PLAID_CLIENT_ID: 'test-plaid-client-id',
+  PLAID_SECRET: 'test-plaid-secret',
+  ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
 };
 
 describe('loadConfig', () => {
@@ -35,6 +38,17 @@ describe('loadConfig', () => {
 
   it('throws when a value is invalid', () => {
     expect(() => loadConfig({ ...validEnv, DYNAMODB_ENDPOINT: 'not-a-url' })).toThrow();
+  });
+
+  it('throws a descriptive error when ENCRYPTION_KEY is not a base64-encoded 32-byte key', () => {
+    expect(() => loadConfig({ ...validEnv, ENCRYPTION_KEY: 'too-short' })).toThrow(
+      /ENCRYPTION_KEY must be a base64-encoded 32-byte key/,
+    );
+  });
+
+  it('treats an empty PLAID_WEBHOOK_URL (as a .env.example `KEY=` line produces) as absent', () => {
+    const config = loadConfig({ ...validEnv, PLAID_WEBHOOK_URL: '' });
+    expect(config.PLAID_WEBHOOK_URL).toBeUndefined();
   });
 
   it('parses boolean-string env vars correctly, including the false case', () => {

@@ -13,6 +13,12 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@quidsin/core": "*",
+    "jose": "^6.2.16",
+    "plaid": "^51.0.0"
   }
 }

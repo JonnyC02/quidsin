@@ -58,7 +58,10 @@ export interface BuildApiAppDeps {
  * never calls ensureTableExists itself; that stays the self-hosted
  * entrypoint's responsibility, run before this is called.
  */
-export async function buildApiApp(config: Config, deps: BuildApiAppDeps): Promise<{ app: Express }> {
+export async function buildApiApp(
+  config: Config,
+  deps: BuildApiAppDeps,
+): Promise<{ app: Express; authService: AuthService }> {
   const docClient = createDocumentClient(deps.dynamoClient);
   const tableName = config.DYNAMODB_TABLE_NAME;
 
@@ -167,5 +170,5 @@ export async function buildApiApp(config: Config, deps: BuildApiAppDeps): Promis
     sessionCookieSecure: config.SESSION_COOKIE_SECURE,
   });
 
-  return { app };
+  return { app, authService };
 }

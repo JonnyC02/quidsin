@@ -11,9 +11,14 @@ function isoDateIn(daysFromNow: number): string {
 
 describe('GET /dashboard', () => {
   it('reports an empty summary for a brand-new user', async () => {
-    const { app } = buildTestApp();
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok', {
+      sub: 'g-jonny',
+      email: 'jonny@example.com',
+      emailVerified: true,
+    });
     const agent = request.agent(app);
-    await agent.post('/auth/register').send({ email: 'jonny@example.com', password: 'secret123' });
+    await agent.post('/auth/google').send({ idToken: 'tok' });
 
     const response = await agent.get('/dashboard');
     expect(response.status).toBe(200);
@@ -21,9 +26,14 @@ describe('GET /dashboard', () => {
   });
 
   it('computes totals and remaining income across income and expenses', async () => {
-    const { app } = buildTestApp();
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok', {
+      sub: 'g-jonny',
+      email: 'jonny@example.com',
+      emailVerified: true,
+    });
     const agent = request.agent(app);
-    await agent.post('/auth/register').send({ email: 'jonny@example.com', password: 'secret123' });
+    await agent.post('/auth/google').send({ idToken: 'tok' });
 
     await agent.post('/income').send({
       name: 'Salary',

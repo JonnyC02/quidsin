@@ -2,25 +2,21 @@ import type {
   Account,
   AccountPatch,
   AccountRepository,
+  GoogleIdentity,
+  GoogleIdentityVerifier,
+  GoogleProfile,
   NewAccount,
-  NewPasswordResetToken,
   NewRecurringMoneyItem,
   NewSession,
-  Notifier,
-  PasswordResetToken,
-  PasswordResetTokenRepository,
   RecurringMoneyItem,
   RecurringMoneyItemPatch,
   RecurringMoneyItemRepository,
-  RegisterUserInput,
-  SendPasswordResetEmailInput,
   Session,
   SessionRepository,
   Tenant,
   User,
   UserRepository,
 } from '@quidsin/core';
-import { ConflictError } from '@quidsin/core';
 
 /**
  * Trimmed, route-test-only in-memory fakes. Deliberately not shared with
@@ -32,66 +28,50 @@ import { ConflictError } from '@quidsin/core';
  * packages/core's own unit tests.
  */
 export class InMemoryUserRepository implements UserRepository {
-  private readonly usersById = new Map<string, User>();
-  private readonly userIdByEmail = new Map<string, string>();
+  private readonly usersByGoogleSub = new Map<string, User>();
   private readonly tenantsById = new Map<string, Tenant>();
-  private nextId = 1;
+  private nextTenantId = 1;
 
   async findById(id: string): Promise<User | null> {
-    return this.usersById.get(id) ?? null;
+    return this.usersByGoogleSub.get(id) ?? null;
   }
 
-  async findByEmail(email: string): Promise<User | null> {
-    const userId = this.userIdByEmail.get(email);
-    return userId ? (this.usersById.get(userId) ?? null) : null;
-  }
-
-  async register(input: RegisterUserInput): Promise<{ user: User; tenant: Tenant }> {
-    if (this.userIdByEmail.has(input.email)) {
-      throw new ConflictError('Email already registered');
+  async findOrCreateByGoogleProfile(
+    profile: GoogleProfile,
+  ): Promise<{ user: User; tenant: Tenant }> {
+    const existing = this.usersByGoogleSub.get(profile.googleSub);
+    if (existing) {
+      const tenant = this.tenantsById.get(existing.tenantId)!;
+      return { user: existing, tenant };
     }
 
-    const userId = `user-${this.nextId}`;
-    const tenantId = `tenant-${this.nextId}`;
-    this.nextId += 1;
+    const tenantId = `tenant-${this.nextTenantId}`;
+    this.nextTenantId += 1;
 
     const now = new Date().toISOString();
     const user: User = {
-      id: userId,
-      email: input.email,
-      passwordHash: input.passwordHash,
+      id: profile.googleSub,
+      email: profile.email,
       tenantId,
-      name: input.name,
+      name: profile.name,
       createdAt: now,
       updatedAt: now,
     };
     const tenant: Tenant = {
       id: tenantId,
-      name: input.name ?? input.email,
-      ownerId: userId,
+      name: profile.name ?? profile.email,
+      ownerId: user.id,
       createdAt: now,
     };
 
-    this.usersById.set(userId, user);
-    this.userIdByEmail.set(input.email, userId);
+    this.usersByGoogleSub.set(user.id, user);
     this.tenantsById.set(tenantId, tenant);
 
     return { user, tenant };
   }
 
-  async updatePasswordHash(userId: string, passwordHash: string): Promise<void> {
-    const user = this.usersById.get(userId);
-    if (user) {
-      this.usersById.set(userId, { ...user, passwordHash });
-    }
-  }
-
   async delete(userId: string, tenantId: string): Promise<void> {
-    const user = this.usersById.get(userId);
-    if (user) {
-      this.userIdByEmail.delete(user.email);
-    }
-    this.usersById.delete(userId);
+    this.usersByGoogleSub.delete(userId);
     this.tenantsById.delete(tenantId);
   }
 }
@@ -128,32 +108,20 @@ export class InMemorySessionRepository implements SessionRepository {
   }
 }
 
-export class InMemoryPasswordResetTokenRepository implements PasswordResetTokenRepository {
-  private readonly tokens = new Map<string, PasswordResetToken>();
+/** Stands in for real Google infrastructure — nothing in tests calls Google. */
+export class FakeGoogleIdentityVerifier implements GoogleIdentityVerifier {
+  private readonly identitiesByToken = new Map<string, GoogleIdentity>();
 
-  async create(token: NewPasswordResetToken): Promise<PasswordResetToken> {
-    const record: PasswordResetToken = { ...token, used: false };
-    this.tokens.set(token.tokenHash, record);
-    return record;
+  seed(token: string, identity: GoogleIdentity): void {
+    this.identitiesByToken.set(token, identity);
   }
 
-  async findByTokenHash(tokenHash: string): Promise<PasswordResetToken | null> {
-    return this.tokens.get(tokenHash) ?? null;
-  }
-
-  async markUsed(tokenHash: string): Promise<void> {
-    const token = this.tokens.get(tokenHash);
-    if (token) {
-      this.tokens.set(tokenHash, { ...token, used: true });
+  async verify(idToken: string): Promise<GoogleIdentity> {
+    const identity = this.identitiesByToken.get(idToken);
+    if (!identity) {
+      throw new Error('unrecognized fake Google ID token');
     }
-  }
-
-  async deleteAllForUser(userId: string): Promise<void> {
-    for (const [hash, token] of this.tokens) {
-      if (token.userId === userId) {
-        this.tokens.delete(hash);
-      }
-    }
+    return identity;
   }
 }
 
@@ -268,13 +236,5 @@ export class InMemoryAccountRepository implements AccountRepository {
   async getById(tenantId: string, id: string): Promise<Account | null> {
     const account = this.accounts.get(id);
     return account && account.tenantId === tenantId ? account : null;
-  }
-}
-
-export class CapturingNotifier implements Notifier {
-  readonly sentEmails: SendPasswordResetEmailInput[] = [];
-
-  async sendPasswordResetEmail(input: SendPasswordResetEmailInput): Promise<void> {
-    this.sentEmails.push(input);
   }
 }

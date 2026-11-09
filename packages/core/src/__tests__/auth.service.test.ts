@@ -1,11 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AuthService, InvalidCredentialsError, ValidationError } from '../index.js';
+import { AuthService, InvalidCredentialsError } from '../index.js';
 import {
-  CapturingNotifier,
-  FakePasswordHasher,
+  FakeGoogleIdentityVerifier,
   FixedClock,
   InMemoryAccountRepository,
-  InMemoryPasswordResetTokenRepository,
   InMemoryRecurringMoneyItemRepository,
   InMemorySessionRepository,
   InMemoryUserRepository,
@@ -14,11 +12,17 @@ import {
 import type { IncomeSource } from '../domain/entities/income.js';
 import type { RecurringExpense } from '../domain/entities/expense.js';
 
+const VERIFIED_IDENTITY = {
+  sub: 'google-sub-1',
+  email: 'jonny@example.com',
+  emailVerified: true,
+  name: 'Jonny',
+};
+
 function buildAuthService() {
   const clock = new FixedClock(new Date('2026-01-01T00:00:00.000Z'));
-  const notifier = new CapturingNotifier();
+  const googleIdentityVerifier = new FakeGoogleIdentityVerifier();
   const sessionRepository = new InMemorySessionRepository();
-  const passwordResetTokenRepository = new InMemoryPasswordResetTokenRepository();
   const userRepository = new InMemoryUserRepository();
   const incomeRepository = new InMemoryRecurringMoneyItemRepository<IncomeSource>();
   const expenseRepository = new InMemoryRecurringMoneyItemRepository<RecurringExpense>();
@@ -27,29 +31,16 @@ function buildAuthService() {
   const service = new AuthService({
     userRepository,
     sessionRepository,
-    passwordResetTokenRepository,
+    googleIdentityVerifier,
     incomeRepository,
     expenseRepository,
     accountRepository,
-    passwordHasher: new FakePasswordHasher(),
-    notifier,
     clock,
     idGenerator: new SequentialIdGenerator(),
-    config: {
-      sessionDurationHours: 168,
-      passwordResetTokenTtlMinutes: 60,
-      passwordResetBaseUrl: 'http://localhost:5173/reset-password',
-    },
+    config: { sessionDurationHours: 168 },
   });
 
-  return {
-    service,
-    clock,
-    notifier,
-    sessionRepository,
-    passwordResetTokenRepository,
-    userRepository,
-  };
+  return { service, clock, googleIdentityVerifier, sessionRepository, userRepository };
 }
 
 describe('AuthService', () => {
@@ -57,49 +48,52 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     ctx = buildAuthService();
+    ctx.googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
   });
 
-  it('registers a user, creates their tenant, and issues a session', async () => {
-    const result = await ctx.service.register({
-      email: 'Jonny@Example.com',
-      password: 'secret123',
-    });
+  it('signs in a new Google account, creates their tenant, and issues a session', async () => {
+    const result = await ctx.service.signInWithGoogle('tok-jonny');
 
+    expect(result.user.id).toBe('google-sub-1');
     expect(result.user.email).toBe('jonny@example.com');
     expect(result.tenant.ownerId).toBe(result.user.id);
     expect(result.sessionId).toBeTruthy();
     expect(new Date(result.expiresAt).getTime()).toBeGreaterThan(ctx.clock.now().getTime());
   });
 
-  it('rejects registering the same email twice', async () => {
-    await ctx.service.register({ email: 'jonny@example.com', password: 'secret123' });
-    await expect(
-      ctx.service.register({ email: 'jonny@example.com', password: 'other' }),
-    ).rejects.toThrow();
+  it('reuses the same user and tenant on a second sign-in with the same Google sub', async () => {
+    const first = await ctx.service.signInWithGoogle('tok-jonny');
+    const second = await ctx.service.signInWithGoogle('tok-jonny');
+
+    expect(second.user.id).toBe(first.user.id);
+    expect(second.tenant.id).toBe(first.tenant.id);
+    // A fresh session is still issued each sign-in.
+    expect(second.sessionId).not.toBe(first.sessionId);
   });
 
-  it('logs in with correct credentials and rejects incorrect ones', async () => {
-    await ctx.service.register({ email: 'jonny@example.com', password: 'secret123' });
+  it('rejects an unrecognized or unverifiable Google ID token', async () => {
+    await expect(ctx.service.signInWithGoogle('not-a-real-token')).rejects.toThrow(
+      InvalidCredentialsError,
+    );
+  });
 
-    const login = await ctx.service.login({ email: 'jonny@example.com', password: 'secret123' });
-    expect(login.user.email).toBe('jonny@example.com');
+  it('rejects a Google account with an unverified email', async () => {
+    ctx.googleIdentityVerifier.seed('tok-unverified', {
+      ...VERIFIED_IDENTITY,
+      sub: 'google-sub-2',
+      emailVerified: false,
+    });
 
-    await expect(
-      ctx.service.login({ email: 'jonny@example.com', password: 'wrong' }),
-    ).rejects.toThrow(InvalidCredentialsError);
-    await expect(
-      ctx.service.login({ email: 'unknown@example.com', password: 'wrong' }),
-    ).rejects.toThrow(InvalidCredentialsError);
+    await expect(ctx.service.signInWithGoogle('tok-unverified')).rejects.toThrow(
+      InvalidCredentialsError,
+    );
   });
 
   it('validates an active session and returns null for an unknown or expired one', async () => {
-    const { sessionId } = await ctx.service.register({
-      email: 'jonny@example.com',
-      password: 'secret123',
-    });
+    const { sessionId } = await ctx.service.signInWithGoogle('tok-jonny');
 
     const valid = await ctx.service.validateSession(sessionId);
-    expect(valid?.userId).toBeTruthy();
+    expect(valid?.userId).toBe('google-sub-1');
 
     expect(await ctx.service.validateSession('nope')).toBeNull();
 
@@ -108,76 +102,21 @@ describe('AuthService', () => {
   });
 
   it('logs out by deleting the session', async () => {
-    const { sessionId } = await ctx.service.register({
-      email: 'jonny@example.com',
-      password: 'secret123',
-    });
+    const { sessionId } = await ctx.service.signInWithGoogle('tok-jonny');
     await ctx.service.logout(sessionId);
     expect(await ctx.service.validateSession(sessionId)).toBeNull();
   });
 
-  it('completes a full password reset flow and invalidates existing sessions', async () => {
-    const { user, sessionId } = await ctx.service.register({
-      email: 'jonny@example.com',
-      password: 'secret123',
-    });
-
-    await ctx.service.requestPasswordReset('jonny@example.com');
-    expect(ctx.notifier.sentEmails).toHaveLength(1);
-
-    const resetUrl = ctx.notifier.sentEmails[0]!.resetUrl;
-    const token = new URL(resetUrl).searchParams.get('token')!;
-
-    await ctx.service.resetPassword({ token, newPassword: 'newpassword456' });
-
-    // Old session is gone...
-    expect(await ctx.service.validateSession(sessionId)).toBeNull();
-
-    // ...old password no longer works, new one does.
-    await expect(
-      ctx.service.login({ email: 'jonny@example.com', password: 'secret123' }),
-    ).rejects.toThrow();
-    const relogin = await ctx.service.login({
-      email: 'jonny@example.com',
-      password: 'newpassword456',
-    });
-    expect(relogin.user.id).toBe(user.id);
-  });
-
-  it('does not reveal whether an email exists when requesting a reset', async () => {
-    await expect(ctx.service.requestPasswordReset('unknown@example.com')).resolves.toBeUndefined();
-    expect(ctx.notifier.sentEmails).toHaveLength(0);
-  });
-
-  it('rejects an invalid or already-used reset token', async () => {
-    await expect(
-      ctx.service.resetPassword({ token: 'bogus', newPassword: 'whatever123' }),
-    ).rejects.toThrow(ValidationError);
-
-    await ctx.service.register({ email: 'jonny@example.com', password: 'secret123' });
-    await ctx.service.requestPasswordReset('jonny@example.com');
-    const token = new URL(ctx.notifier.sentEmails[0]!.resetUrl).searchParams.get('token')!;
-
-    await ctx.service.resetPassword({ token, newPassword: 'newpassword456' });
-    await expect(ctx.service.resetPassword({ token, newPassword: 'again12345' })).rejects.toThrow(
-      ValidationError,
-    );
-  });
-
-  it('deletes an account and all of its sessions/reset tokens', async () => {
-    const { user, tenant, sessionId } = await ctx.service.register({
-      email: 'jonny@example.com',
-      password: 'secret123',
-    });
+  it('deletes an account and provisions a fresh user/tenant on re-sign-in with the same Google account', async () => {
+    const { user, tenant, sessionId } = await ctx.service.signInWithGoogle('tok-jonny');
 
     await ctx.service.deleteAccount({ userId: user.id, tenantId: tenant.id });
 
     expect(await ctx.service.validateSession(sessionId)).toBeNull();
     expect(await ctx.userRepository.findById(user.id)).toBeNull();
 
-    // Re-registering with the same email should now succeed.
-    await expect(
-      ctx.service.register({ email: 'jonny@example.com', password: 'brandnew123' }),
-    ).resolves.toBeTruthy();
+    const resignedIn = await ctx.service.signInWithGoogle('tok-jonny');
+    expect(resignedIn.user.id).toBe(user.id); // same Google sub
+    expect(resignedIn.tenant.id).not.toBe(tenant.id); // fresh tenant
   });
 });

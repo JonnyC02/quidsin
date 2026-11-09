@@ -33,7 +33,7 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
-          paths: ['express', 'aws-sdk', 'plaid', 'dockerode'],
+          paths: ['express', 'aws-sdk', 'plaid', 'dockerode', 'google-auth-library'],
           patterns: ['@aws-sdk/*'],
         },
       ],

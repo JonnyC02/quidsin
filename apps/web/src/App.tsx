@@ -4,9 +4,6 @@ import { PublicOnlyRoute } from './routes/PublicOnlyRoute.js';
 import { AppShell } from './components/AppShell.js';
 import { PublicShell } from './components/PublicShell.js';
 import { LoginPage } from './pages/LoginPage.js';
-import { RegisterPage } from './pages/RegisterPage.js';
-import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
-import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
 import { OverviewPage } from './pages/OverviewPage.js';
 import { IncomePage } from './pages/IncomePage.js';
 import { ExpensesPage } from './pages/ExpensesPage.js';
@@ -21,9 +18,6 @@ function App() {
       <Route element={<PublicOnlyRoute />}>
         <Route element={<PublicShell />}>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
         </Route>
       </Route>
 

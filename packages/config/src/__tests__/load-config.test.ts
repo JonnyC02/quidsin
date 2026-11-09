@@ -9,6 +9,7 @@ const validEnv = {
   DYNAMODB_REGION: 'local',
   AWS_ACCESS_KEY_ID: 'local',
   AWS_SECRET_ACCESS_KEY: 'local',
+  GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
 };
 
 describe('loadConfig', () => {
@@ -17,6 +18,7 @@ describe('loadConfig', () => {
 
     expect(config.PORT).toBe(3001);
     expect(config.DYNAMODB_ENDPOINT).toBe('http://localhost:8000');
+    expect(config.GOOGLE_CLIENT_ID).toBe('test-client-id.apps.googleusercontent.com');
   });
 
   it('throws a descriptive error when a required var is missing', () => {
@@ -25,32 +27,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig(incomplete)).toThrow(/DYNAMODB_ENDPOINT/);
   });
 
+  it('throws a descriptive error when GOOGLE_CLIENT_ID is missing', () => {
+    const { GOOGLE_CLIENT_ID: _omit, ...incomplete } = validEnv;
+
+    expect(() => loadConfig(incomplete)).toThrow(/GOOGLE_CLIENT_ID/);
+  });
+
   it('throws when a value is invalid', () => {
     expect(() => loadConfig({ ...validEnv, DYNAMODB_ENDPOINT: 'not-a-url' })).toThrow();
-  });
-
-  it('defaults the notifier to console and does not require SMTP vars', () => {
-    const config = loadConfig(validEnv);
-    expect(config.NOTIFIER_DRIVER).toBe('console');
-  });
-
-  it('requires SMTP vars when NOTIFIER_DRIVER=smtp', () => {
-    expect(() => loadConfig({ ...validEnv, NOTIFIER_DRIVER: 'smtp' })).toThrow(/SMTP_HOST/);
-  });
-
-  it('accepts NOTIFIER_DRIVER=smtp when all SMTP vars are present', () => {
-    const config = loadConfig({
-      ...validEnv,
-      NOTIFIER_DRIVER: 'smtp',
-      SMTP_HOST: 'smtp.example.com',
-      SMTP_PORT: '587',
-      SMTP_USER: 'user',
-      SMTP_PASSWORD: 'pass',
-      SMTP_FROM_ADDRESS: 'noreply@example.com',
-    });
-
-    expect(config.SMTP_HOST).toBe('smtp.example.com');
-    expect(config.SMTP_PORT).toBe(587);
   });
 
   it('parses boolean-string env vars correctly, including the false case', () => {

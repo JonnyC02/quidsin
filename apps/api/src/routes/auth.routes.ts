@@ -5,23 +5,7 @@ import { asyncHandler } from '../middleware/async-handler.js';
 import { parseOrThrow } from '../middleware/validate.js';
 import { requireAuth, SESSION_COOKIE_NAME } from '../middleware/require-auth.js';
 
-const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
-  name: z.string().min(1).optional(),
-});
-
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
-
-const requestResetSchema = z.object({ email: z.string().email() });
-
-const confirmResetSchema = z.object({
-  token: z.string().min(1),
-  newPassword: z.string().min(8),
-});
+const googleSignInSchema = z.object({ idToken: z.string().min(1) });
 
 export interface AuthRoutesDeps {
   authService: AuthService;
@@ -46,22 +30,12 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Router {
   }
 
   router.post(
-    '/register',
+    '/google',
     asyncHandler(async (req, res) => {
-      const input = parseOrThrow(registerSchema, req.body);
-      const { user, sessionId, expiresAt } = await deps.authService.register(input);
+      const input = parseOrThrow(googleSignInSchema, req.body);
+      const { user, sessionId, expiresAt } = await deps.authService.signInWithGoogle(input.idToken);
       setSessionCookie(res, sessionId, expiresAt);
-      res.status(201).json({ user: toUserResponse(user) });
-    }),
-  );
-
-  router.post(
-    '/login',
-    asyncHandler(async (req, res) => {
-      const input = parseOrThrow(loginSchema, req.body);
-      const { user, sessionId, expiresAt } = await deps.authService.login(input);
-      setSessionCookie(res, sessionId, expiresAt);
-      res.json({ user: toUserResponse(user) });
+      res.status(200).json({ user: toUserResponse(user) });
     }),
   );
 
@@ -95,24 +69,6 @@ export function createAuthRoutes(deps: AuthRoutesDeps): Router {
     asyncHandler(async (req, res) => {
       await deps.authService.deleteAccount(req.authContext!);
       res.clearCookie(SESSION_COOKIE_NAME);
-      res.status(204).send();
-    }),
-  );
-
-  router.post(
-    '/password-reset/request',
-    asyncHandler(async (req, res) => {
-      const input = parseOrThrow(requestResetSchema, req.body);
-      await deps.authService.requestPasswordReset(input.email);
-      res.status(202).json({ message: 'If that email is registered, a reset link has been sent.' });
-    }),
-  );
-
-  router.post(
-    '/password-reset/confirm',
-    asyncHandler(async (req, res) => {
-      const input = parseOrThrow(confirmResetSchema, req.body);
-      await deps.authService.resetPassword(input);
       res.status(204).send();
     }),
   );

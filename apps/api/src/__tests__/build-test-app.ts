@@ -8,15 +8,13 @@ import {
   IncomeService,
   RandomUuidGenerator,
   SystemClock,
-  type PasswordHasher,
 } from '@quidsin/core';
 import type { IncomeSource } from '@quidsin/core';
 import type { RecurringExpense } from '@quidsin/core';
 import { createApp } from '../app.js';
 import {
-  CapturingNotifier,
+  FakeGoogleIdentityVerifier,
   InMemoryAccountRepository,
-  InMemoryPasswordResetTokenRepository,
   InMemoryRecurringMoneyItemRepository,
   InMemorySessionRepository,
   InMemoryUserRepository,
@@ -33,28 +31,16 @@ class FakeDatabase implements HealthCheckable {
   }
 }
 
-/** Fast, reversible — test-only, never used outside this file. */
-class FakePasswordHasher implements PasswordHasher {
-  async hash(plaintext: string): Promise<string> {
-    return `hashed:${plaintext}`;
-  }
-
-  async verify(hash: string, plaintext: string): Promise<boolean> {
-    return hash === `hashed:${plaintext}`;
-  }
-}
-
 export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
   app: Express;
-  notifier: CapturingNotifier;
+  googleIdentityVerifier: FakeGoogleIdentityVerifier;
 } {
   const clock = new SystemClock();
   const idGenerator = new RandomUuidGenerator();
-  const notifier = new CapturingNotifier();
+  const googleIdentityVerifier = new FakeGoogleIdentityVerifier();
 
   const userRepository = new InMemoryUserRepository();
   const sessionRepository = new InMemorySessionRepository();
-  const passwordResetTokenRepository = new InMemoryPasswordResetTokenRepository();
   const incomeRepository = new InMemoryRecurringMoneyItemRepository<IncomeSource>();
   const expenseRepository = new InMemoryRecurringMoneyItemRepository<RecurringExpense>();
   const accountRepository = new InMemoryAccountRepository();
@@ -62,18 +48,14 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
   const authService = new AuthService({
     userRepository,
     sessionRepository,
-    passwordResetTokenRepository,
+    googleIdentityVerifier,
     incomeRepository,
     expenseRepository,
     accountRepository,
-    passwordHasher: new FakePasswordHasher(),
-    notifier,
     clock,
     idGenerator,
     config: {
       sessionDurationHours: 168,
-      passwordResetTokenTtlMinutes: 60,
-      passwordResetBaseUrl: 'http://localhost:5173/reset-password',
     },
   });
 
@@ -98,5 +80,5 @@ export function buildTestApp(options: { databaseHealthy?: boolean } = {}): {
     sessionCookieSecure: false,
   });
 
-  return { app, notifier };
+  return { app, googleIdentityVerifier };
 }

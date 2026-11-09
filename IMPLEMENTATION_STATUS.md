@@ -2,7 +2,10 @@
 
 ## Current phase
 
-**Phase 2 — Core Financial Functionality: complete.**
+**Phase 2 — Core Financial Functionality: complete.** Authentication was
+subsequently replaced with Google Sign-In (see "Authentication replaced
+with Google Sign-In" below) — this superseded Phase 2's original
+password-based auth before Phase 3 began.
 
 ## Completed functionality
 
@@ -21,13 +24,9 @@
 ### Phase 2 — Core Financial Functionality
 
 - **Authentication** (`packages/core/src/application/auth.service.ts`):
-  registration (atomic email-uniqueness + user + personal tenant via a
-  DynamoDB `TransactWriteCommand`), login, logout, DynamoDB-backed
-  server-side sessions (`ttl` + explicit `expiresAt` check, sliding
-  renewal), password hashing via Argon2id, password reset (token +
-  `Notifier` port with `ConsoleNotifier`/`SmtpNotifier` adapters), account
-  deletion (sessions/tokens → domain records → user/tenant, best-effort
-  non-transactional cascade).
+  originally shipped as email/password (Argon2id hashing, token-based
+  password reset). **Replaced with Google Sign-In** shortly after Phase 2
+  — see the dedicated section below for the current mechanism.
 - **Income / recurring expenses** (`IncomeService`/`ExpenseService`,
   sharing `RecurringMoneyItemService<T>`): CRUD, pause/resume without
   deleting, decimal-safe monthly-equivalent calculation via `decimal.js`
@@ -50,20 +49,66 @@
   cross-origin cookie auth, which Phase 1 didn't need.
 - **`apps/web`**: React Router (public vs. protected route groups),
   TanStack Query (session state mirrors the httpOnly cookie, not stored
-  client-side), Tailwind CSS v4, Recharts. Pages for login/register/
-  forgot-password/reset-password, Overview (dashboard), Income, Expenses,
-  Accounts, Settings (account deletion). The Overview chart is a snapshot
+  client-side), Tailwind CSS v4, Recharts. Pages for login (now Google
+  Sign-In — see below), Overview (dashboard), Income, Expenses, Accounts,
+  Settings (account deletion). The Overview chart is a snapshot
   income-vs-expenses bar chart, not a time series — there's no transaction
   history yet to plot a trend from.
 - `packages/shared` gained `money.ts` (`parseAmountToMinorUnits`,
   `formatMinorUnits`, via `decimal.js`) — the one place decimal-safe
   amount parsing happens, used by the frontend's forms.
 
-End-to-end verified via `docker compose up`: register → create a
-non-round weekly income and quarterly expense → dashboard totals match
-hand-calculated values exactly → log out/in → full password reset via the
-console notifier → delete account → re-register with the same email
-(proves the email lock was actually cleaned up).
+End-to-end verified via `docker compose up`: create a non-round weekly
+income and quarterly expense → dashboard totals match hand-calculated
+values exactly → log out/in → delete account → re-sign-in (proves cleanup
+actually happened). (Originally verified against password-based
+register/login/password-reset before the Google Sign-In replacement; see
+below for the current auth flow's own verification.)
+
+## Authentication replaced with Google Sign-In
+
+Shortly after Phase 2 shipped, authentication was replaced entirely —
+not extended — with Google Sign-In ("go all in on Google" was the
+explicit instruction). Password hashing, password reset, and all email
+notifier infrastructure were deleted outright.
+
+**Mechanism**: Google Identity Services (GIS) ID-token flow, not a
+server-side OAuth redirect. `apps/web` renders Google's hosted Sign-In
+button (`@react-oauth/google`); on success the browser already holds a
+Google-signed ID token, which gets POSTed to `POST /auth/google`.
+`apps/api/src/infra/google-identity-verifier.ts` verifies it server-side
+via `google-auth-library`'s `OAuth2Client.verifyIdToken()` (audience =
+`GOOGLE_CLIENT_ID`). No client secret, no redirect URI, no CSRF state
+parameter to manage — Google signs the token and handles the entire
+browser-side flow. `packages/core` stays infrastructure-free: it defines
+a `GoogleIdentityVerifier` port, `apps/api` is the only place
+`google-auth-library` is imported (also added to the `no-restricted-imports`
+ESLint rule for `packages/core/**` as defense-in-depth).
+
+**`User.id` is the Google `sub` claim directly** — it's already globally
+unique and permanent, so there's no separate generated UUID and no
+separate uniqueness-lock record (the old `EmailLock` pattern is gone
+entirely). `DynamoUserRepository.findOrCreateByGoogleProfile` provisions
+with a plain conditional `PutItem` (`attribute_not_exists(pk)`) on the
+user's own primary key; the losing side of a first-sign-in race just
+falls back to a read. One fewer item type, one fewer lookup, one fewer
+`TransactWriteCommand` versus the password-based flow it replaced.
+
+End-to-end verified with a real Google account via `docker compose up`:
+Sign-In button renders → real Google sign-in → redirect to `/overview` and
+session persists across a refresh → income/expense/account CRUD unaffected
+→ sign out → 401 on `/auth/me` → delete account → sign in again with the
+same Google account → fresh empty tenant provisioned (no leftover lock
+artifact). Automated coverage (unit + integration + route tests) uses a
+`FakeGoogleIdentityVerifier` test double — nothing in the test suite calls
+real Google infrastructure.
+
+**Deliberate, acknowledged trade-off**: this walks back the original
+master spec's requirement that Community Edition authentication work
+"without relying on a third-party hosted authentication service."
+Self-hosted QuidsIn now requires a Google Cloud OAuth Client ID to
+function at all — there is no password fallback. This was a conscious
+choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
@@ -174,10 +219,10 @@ See the approved plans for full rationale; summarized:
   Records carry `tenantId`/`ownerId`/`visibility` from day one so Phase
   4's sharing/roles work doesn't require a schema migration, even though
   Phase 2 doesn't enforce sharing (there's no invitation flow yet).
-- **Password reset ships now**, behind a `Notifier` port with a
-  console-log default adapter — no SMTP configuration required for
-  self-hosters who don't need real email delivery yet, but the `smtp`
-  driver is there for those who do.
+- ~~Password reset ships now, behind a `Notifier` port with a console-log
+  default adapter~~ — superseded: password auth (and reset) was removed
+  entirely when auth was replaced with Google Sign-In; see "Authentication
+  replaced with Google Sign-In" above.
 - Income/expense records have no `currency` field (the spec's field list
   for them omits it) — treated as single-currency-per-tenant for Phase 2.
   Accounts keep their own `currency` and are shown individually, not

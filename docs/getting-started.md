@@ -8,18 +8,49 @@ income, recurring expenses, accounts, and the dashboard.
 
 - Node.js >= 24.4.0 (see `.nvmrc`)
 - Docker and Docker Compose
+- A Google OAuth Client ID — see "Setting up Google Sign-In" below. The API
+  won't start without `GOOGLE_CLIENT_ID` configured.
+
+## Setting up Google Sign-In
+
+QuidsIn uses Google Sign-In for authentication — there's no email/password
+option. Before running QuidsIn, create a Google OAuth Client ID:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), go to
+   **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
+2. Application type: **Web application**.
+3. Under **Authorized JavaScript origins**, add the origin the _browser_
+   will load the web app from:
+   - Local Docker Compose dev: `http://localhost:5173`
+   - A real deployment: your actual web origin, e.g. `https://app.example.com`
+4. No redirect URI and no client secret are needed — QuidsIn only uses the
+   token-based "Sign in with Google" flow, not a server-side OAuth
+   redirect.
+5. Copy the generated **Client ID** — you'll set it as both `GOOGLE_CLIENT_ID`
+   (used server-side by the API to verify the token's audience) and
+   `VITE_GOOGLE_CLIENT_ID` (used client-side to render the Sign-In button).
+   Same value, two env vars, one per app. It can take a few minutes for a
+   newly added authorized origin to take effect.
+
+This is a deliberate architectural choice, not a limitation of this
+release — see `IMPLEMENTATION_STATUS.md` for the reasoning and the
+trade-off it makes for self-hosted deployments.
 
 ## Option A: Docker Compose (recommended)
 
-This brings up DynamoDB Local, the API, the worker, and the web app together:
+Set `GOOGLE_CLIENT_ID` and `VITE_GOOGLE_CLIENT_ID` in your shell (or in a
+`.env` file next to `deploy/docker/docker-compose.yml`), then bring up
+DynamoDB Local, the API, the worker, and the web app together:
 
 ```sh
+export GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+export VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 docker compose -f deploy/docker/docker-compose.yml up
 ```
 
 Once all services report healthy (`docker compose -f deploy/docker/docker-compose.yml ps`):
 
-- Web: http://localhost:5173 — register an account, then add income,
+- Web: http://localhost:5173 — sign in with Google, then add income,
   recurring expenses, and accounts from the navigation.
 - API health: http://localhost:3001/health
 - API readiness (checks DynamoDB): http://localhost:3001/health/ready
@@ -29,13 +60,6 @@ DynamoDB Local's data persists in the named volume `dynamodb-data` across
 restarts (`docker compose ... down` without `-v` keeps it; `down -v` deletes
 it). The application table and its index are created automatically on API
 startup if they don't already exist.
-
-### Password resets in local/self-hosted use
-
-By default (`NOTIFIER_DRIVER=console`), a password reset doesn't send a
-real email — the reset link is logged to the API's console output
-(`docker compose logs api`). To send real emails, set `NOTIFIER_DRIVER=smtp`
-and the `SMTP_*` variables (see `.env.example`).
 
 ### Known limitation of DynamoDB Local
 
@@ -52,7 +76,11 @@ older server versions don't understand. `docker-compose.yml` pins `3.3.2`.
 
 ## Option B: local processes (without Docker)
 
-1. Copy `.env.example` to `.env` and adjust if needed.
+1. Copy `.env.example` to `.env` and set `GOOGLE_CLIENT_ID` to a real value
+   (see "Setting up Google Sign-In" above) — the API fails to start
+   without it, the same way it already does for `DYNAMODB_ENDPOINT`. Also
+   copy `apps/web/.env.example` to `apps/web/.env` and set
+   `VITE_GOOGLE_CLIENT_ID` to the same Client ID.
 2. Start DynamoDB Local yourself (e.g. via Docker: `docker run -p 8000:8000 amazon/dynamodb-local:3.3.2`).
 3. Install dependencies: `npm install`
 4. Run everything: `npm run dev`

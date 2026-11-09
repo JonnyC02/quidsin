@@ -60,16 +60,8 @@ export interface AuthUser {
   tenantId: string;
 }
 
-export function register(input: {
-  email: string;
-  password: string;
-  name?: string;
-}): Promise<{ user: AuthUser }> {
-  return request('/auth/register', { method: 'POST', body: JSON.stringify(input) });
-}
-
-export function login(input: { email: string; password: string }): Promise<{ user: AuthUser }> {
-  return request('/auth/login', { method: 'POST', body: JSON.stringify(input) });
+export function loginWithGoogle(idToken: string): Promise<{ user: AuthUser }> {
+  return request('/auth/google', { method: 'POST', body: JSON.stringify({ idToken }) });
 }
 
 export function logout(): Promise<void> {
@@ -82,17 +74,6 @@ export function getCurrentSession(): Promise<{ userId: string; tenantId: string 
 
 export function deleteCurrentUserAccount(): Promise<void> {
   return request('/auth/account', { method: 'DELETE' });
-}
-
-export function requestPasswordReset(email: string): Promise<void> {
-  return request('/auth/password-reset/request', {
-    method: 'POST',
-    body: JSON.stringify({ email }),
-  });
-}
-
-export function confirmPasswordReset(input: { token: string; newPassword: string }): Promise<void> {
-  return request('/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify(input) });
 }
 
 // --- Income / Expenses (identical shape; kept as separate named groups

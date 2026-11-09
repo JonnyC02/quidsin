@@ -5,7 +5,6 @@ export type { Visibility } from './domain/entities/visibility.js';
 export type { User } from './domain/entities/user.js';
 export type { Tenant } from './domain/entities/tenant.js';
 export type { Session } from './domain/entities/session.js';
-export type { PasswordResetToken } from './domain/entities/password-reset-token.js';
 export type { RecurringMoneyItem } from './domain/entities/recurring-money-item.js';
 export type { IncomeSource } from './domain/entities/income.js';
 export type { RecurringExpense } from './domain/entities/expense.js';
@@ -32,13 +31,10 @@ export {
 export { nextOccurrence, toIsoDateString } from './domain/calculations/next-occurrence.js';
 
 // Ports
-export type { UserRepository, RegisterUserInput } from './ports/user-repository.js';
+export type { UserRepository, GoogleProfile } from './ports/user-repository.js';
 export type { TenantRepository } from './ports/tenant-repository.js';
 export type { SessionRepository, NewSession } from './ports/session-repository.js';
-export type {
-  PasswordResetTokenRepository,
-  NewPasswordResetToken,
-} from './ports/password-reset-token-repository.js';
+export type { GoogleIdentity, GoogleIdentityVerifier } from './ports/google-identity.js';
 export type {
   RecurringMoneyItemRepository,
   NewRecurringMoneyItem,
@@ -47,8 +43,6 @@ export type {
 export type { IncomeRepository } from './ports/income-repository.js';
 export type { ExpenseRepository } from './ports/expense-repository.js';
 export type { AccountRepository, NewAccount, AccountPatch } from './ports/account-repository.js';
-export type { PasswordHasher } from './ports/password-hasher.js';
-export type { Notifier, SendPasswordResetEmailInput } from './ports/notifier.js';
 export { type Clock, SystemClock } from './ports/clock.js';
 export { type IdGenerator, RandomUuidGenerator } from './ports/id-generator.js';
 
@@ -58,8 +52,6 @@ export {
   AuthService,
   type AuthServiceDeps,
   type AuthServiceConfig,
-  type RegisterInput,
-  type LoginInput,
   type SessionIssued,
 } from './application/auth.service.js';
 export {

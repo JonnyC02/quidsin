@@ -34,9 +34,10 @@ services:
       AWS_SECRET_ACCESS_KEY: local
       SESSION_DURATION_HOURS: '168'
       SESSION_COOKIE_SECURE: 'false'
-      PASSWORD_RESET_TOKEN_TTL_MINUTES: '60'
-      PASSWORD_RESET_BASE_URL: http://localhost:5173/reset-password
-      NOTIFIER_DRIVER: console
+      # See docs/getting-started.md ("Setting up Google Sign-In"). No
+      # working committed default — supply it via a .env file next to
+      # this compose file, or export it before `docker compose up`.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
     depends_on:
       dynamodb-local:
         condition: service_healthy
@@ -80,6 +81,7 @@ services:
       # Browser-reachable URL, NOT the Docker-internal service name "api" —
       # the browser runs on the host, not inside the compose network.
       VITE_API_BASE_URL: http://localhost:3001
+      VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
     depends_on:
       - api
     restart: unless-stopped

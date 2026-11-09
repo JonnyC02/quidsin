@@ -6,7 +6,6 @@ import {
   DynamoAccountRepository,
   DynamoExpenseRepository,
   DynamoIncomeRepository,
-  DynamoPasswordResetTokenRepository,
   DynamoSessionRepository,
   DynamoUserRepository,
   ensureTableExists,
@@ -19,12 +18,9 @@ import {
   IncomeService,
   RandomUuidGenerator,
   SystemClock,
-  type Notifier,
 } from '@quidsin/core';
 import { createApp } from './app.js';
-import { Argon2PasswordHasher } from './infra/argon2-password-hasher.js';
-import { ConsoleNotifier } from './infra/console-notifier.js';
-import { SmtpNotifier } from './infra/smtp-notifier.js';
+import { GoogleAuthLibraryIdentityVerifier } from './infra/google-identity-verifier.js';
 
 const config = loadConfig();
 
@@ -48,7 +44,6 @@ await ensureTableExists(dynamoClient, tableName);
 
 const userRepository = new DynamoUserRepository(docClient, tableName);
 const sessionRepository = new DynamoSessionRepository(docClient, tableName);
-const passwordResetTokenRepository = new DynamoPasswordResetTokenRepository(docClient, tableName);
 const incomeRepository = new DynamoIncomeRepository(docClient, tableName);
 const expenseRepository = new DynamoExpenseRepository(docClient, tableName);
 const accountRepository = new DynamoAccountRepository(docClient, tableName);
@@ -56,33 +51,17 @@ const accountRepository = new DynamoAccountRepository(docClient, tableName);
 const clock = new SystemClock();
 const idGenerator = new RandomUuidGenerator();
 
-const notifier: Notifier =
-  config.NOTIFIER_DRIVER === 'smtp'
-    ? new SmtpNotifier({
-        host: config.SMTP_HOST!,
-        port: config.SMTP_PORT!,
-        secure: config.SMTP_SECURE,
-        user: config.SMTP_USER!,
-        password: config.SMTP_PASSWORD!,
-        fromAddress: config.SMTP_FROM_ADDRESS!,
-      })
-    : new ConsoleNotifier();
-
 const authService = new AuthService({
   userRepository,
   sessionRepository,
-  passwordResetTokenRepository,
+  googleIdentityVerifier: new GoogleAuthLibraryIdentityVerifier(config.GOOGLE_CLIENT_ID),
   incomeRepository,
   expenseRepository,
   accountRepository,
-  passwordHasher: new Argon2PasswordHasher(),
-  notifier,
   clock,
   idGenerator,
   config: {
     sessionDurationHours: config.SESSION_DURATION_HOURS,
-    passwordResetTokenTtlMinutes: config.PASSWORD_RESET_TOKEN_TTL_MINUTES,
-    passwordResetBaseUrl: config.PASSWORD_RESET_BASE_URL,
   },
 });
 

@@ -2,58 +2,58 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { buildTestApp } from './build-test-app.js';
 
-describe('POST /auth/register', () => {
-  it('creates a user and sets a session cookie', async () => {
-    const { app } = buildTestApp();
-    const response = await request(app)
-      .post('/auth/register')
-      .send({ email: 'jonny@example.com', password: 'secret123' });
+const VERIFIED_IDENTITY = {
+  sub: 'google-sub-1',
+  email: 'jonny@example.com',
+  emailVerified: true,
+  name: 'Jonny',
+};
 
-    expect(response.status).toBe(201);
+describe('POST /auth/google', () => {
+  it('signs in a new Google account and sets a session cookie', async () => {
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
+
+    const response = await request(app).post('/auth/google').send({ idToken: 'tok-jonny' });
+
+    expect(response.status).toBe(200);
     expect(response.body.user.email).toBe('jonny@example.com');
     expect(response.headers['set-cookie']?.[0]).toMatch(/qsid=/);
   });
 
-  it('returns 400 for an invalid payload', async () => {
+  it('returns 400 for a missing idToken', async () => {
     const { app } = buildTestApp();
-    const response = await request(app)
-      .post('/auth/register')
-      .send({ email: 'not-an-email', password: 'short' });
+    const response = await request(app).post('/auth/google').send({});
 
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('returns 409 for a duplicate email', async () => {
+  it('returns 401 for an unrecognized or invalid idToken', async () => {
     const { app } = buildTestApp();
-    await request(app)
-      .post('/auth/register')
-      .send({ email: 'dup@example.com', password: 'secret123' });
+    const response = await request(app).post('/auth/google').send({ idToken: 'not-seeded' });
 
-    const response = await request(app)
-      .post('/auth/register')
-      .send({ email: 'dup@example.com', password: 'other12345' });
-
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(401);
   });
-});
 
-describe('POST /auth/login', () => {
-  it('logs in with correct credentials and rejects incorrect ones', async () => {
-    const { app } = buildTestApp();
-    await request(app)
-      .post('/auth/register')
-      .send({ email: 'jonny@example.com', password: 'secret123' });
+  it('returns 401 when the Google email is unverified', async () => {
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-unverified', { ...VERIFIED_IDENTITY, emailVerified: false });
 
-    const good = await request(app)
-      .post('/auth/login')
-      .send({ email: 'jonny@example.com', password: 'secret123' });
-    expect(good.status).toBe(200);
+    const response = await request(app).post('/auth/google').send({ idToken: 'tok-unverified' });
 
-    const bad = await request(app)
-      .post('/auth/login')
-      .send({ email: 'jonny@example.com', password: 'wrong' });
-    expect(bad.status).toBe(401);
+    expect(response.status).toBe(401);
+  });
+
+  it('signing in twice with the same Google sub reuses the same user', async () => {
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
+
+    const first = await request(app).post('/auth/google').send({ idToken: 'tok-jonny' });
+    const second = await request(app).post('/auth/google').send({ idToken: 'tok-jonny' });
+
+    expect(first.body.user.id).toBe(second.body.user.id);
+    expect(first.body.user.tenantId).toBe(second.body.user.tenantId);
   });
 });
 
@@ -65,9 +65,10 @@ describe('authenticated routes', () => {
   });
 
   it('allow requests with a valid session cookie', async () => {
-    const { app } = buildTestApp();
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
     const agent = request.agent(app);
-    await agent.post('/auth/register').send({ email: 'jonny@example.com', password: 'secret123' });
+    await agent.post('/auth/google').send({ idToken: 'tok-jonny' });
 
     const response = await agent.get('/auth/me');
     expect(response.status).toBe(200);
@@ -75,9 +76,10 @@ describe('authenticated routes', () => {
   });
 
   it('logout clears the session so the cookie no longer works', async () => {
-    const { app } = buildTestApp();
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
     const agent = request.agent(app);
-    await agent.post('/auth/register').send({ email: 'jonny@example.com', password: 'secret123' });
+    await agent.post('/auth/google').send({ idToken: 'tok-jonny' });
 
     await agent.post('/auth/logout');
     const response = await agent.get('/auth/me');
@@ -85,61 +87,21 @@ describe('authenticated routes', () => {
   });
 });
 
-describe('password reset flow', () => {
-  it('requests a reset, confirms it, and logs the user in with the new password', async () => {
-    const { app, notifier } = buildTestApp();
-    await request(app)
-      .post('/auth/register')
-      .send({ email: 'jonny@example.com', password: 'secret123' });
-
-    const requestResponse = await request(app)
-      .post('/auth/password-reset/request')
-      .send({ email: 'jonny@example.com' });
-    expect(requestResponse.status).toBe(202);
-    expect(notifier.sentEmails).toHaveLength(1);
-
-    const token = new URL(notifier.sentEmails[0]!.resetUrl).searchParams.get('token')!;
-    const confirmResponse = await request(app)
-      .post('/auth/password-reset/confirm')
-      .send({ token, newPassword: 'newpassword456' });
-    expect(confirmResponse.status).toBe(204);
-
-    const loginOld = await request(app)
-      .post('/auth/login')
-      .send({ email: 'jonny@example.com', password: 'secret123' });
-    expect(loginOld.status).toBe(401);
-
-    const loginNew = await request(app)
-      .post('/auth/login')
-      .send({ email: 'jonny@example.com', password: 'newpassword456' });
-    expect(loginNew.status).toBe(200);
-  });
-
-  it('does not reveal whether an email is registered', async () => {
-    const { app, notifier } = buildTestApp();
-    const response = await request(app)
-      .post('/auth/password-reset/request')
-      .send({ email: 'unknown@example.com' });
-
-    expect(response.status).toBe(202);
-    expect(notifier.sentEmails).toHaveLength(0);
-  });
-});
-
 describe('DELETE /auth/account', () => {
-  it('deletes the account and allows re-registration with the same email', async () => {
-    const { app } = buildTestApp();
+  it('deletes the account and allows re-sign-in with the same Google account', async () => {
+    const { app, googleIdentityVerifier } = buildTestApp();
+    googleIdentityVerifier.seed('tok-jonny', VERIFIED_IDENTITY);
     const agent = request.agent(app);
-    await agent.post('/auth/register').send({ email: 'jonny@example.com', password: 'secret123' });
+    const signedIn = await agent.post('/auth/google').send({ idToken: 'tok-jonny' });
 
     const deleteResponse = await agent.delete('/auth/account');
     expect(deleteResponse.status).toBe(204);
 
     expect((await agent.get('/auth/me')).status).toBe(401);
 
-    const reregister = await request(app)
-      .post('/auth/register')
-      .send({ email: 'jonny@example.com', password: 'brandnew123' });
-    expect(reregister.status).toBe(201);
+    const resignIn = await request(app).post('/auth/google').send({ idToken: 'tok-jonny' });
+    expect(resignIn.status).toBe(200);
+    expect(resignIn.body.user.id).toBe(signedIn.body.user.id); // same Google sub
+    expect(resignIn.body.user.tenantId).not.toBe(signedIn.body.user.tenantId); // fresh tenant
   });
 });

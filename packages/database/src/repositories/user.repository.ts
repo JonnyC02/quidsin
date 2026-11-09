@@ -1,19 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import {
   DeleteCommand,
   GetCommand,
-  TransactWriteCommand,
-  UpdateCommand,
+  PutCommand,
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
-import {
-  ConflictError,
-  type RegisterUserInput,
-  type Tenant,
-  type User,
-  type UserRepository,
-} from '@quidsin/core';
+import type { GoogleProfile, Tenant, User, UserRepository } from '@quidsin/core';
 import { keys, stripInternalAttributes } from '../table/schema.js';
 
 export class DynamoUserRepository implements UserRepository {
@@ -29,68 +22,59 @@ export class DynamoUserRepository implements UserRepository {
     return result.Item ? stripInternalAttributes<User>(result.Item) : null;
   }
 
-  async findByEmail(email: string): Promise<User | null> {
-    const lock = await this.docClient.send(
-      new GetCommand({ TableName: this.tableName, Key: keys.emailLock(email) }),
-    );
-
-    if (!lock.Item) {
-      return null;
-    }
-
-    return this.findById(lock.Item.userId as string);
-  }
-
-  async register(input: RegisterUserInput): Promise<{ user: User; tenant: Tenant }> {
-    const userId = randomUUID();
+  async findOrCreateByGoogleProfile(
+    profile: GoogleProfile,
+  ): Promise<{ user: User; tenant: Tenant }> {
+    const userId = profile.googleSub;
     const tenantId = randomUUID();
     const now = new Date().toISOString();
 
     const user: User = {
       id: userId,
-      email: input.email,
-      passwordHash: input.passwordHash,
+      email: profile.email,
       tenantId,
-      name: input.name,
+      name: profile.name,
       createdAt: now,
       updatedAt: now,
     };
     const tenant: Tenant = {
       id: tenantId,
-      name: input.name ?? input.email,
+      name: profile.name ?? profile.email,
       ownerId: userId,
       createdAt: now,
     };
 
+    // Create the tenant first: if the process dies before the conditional
+    // user write below, an orphaned-but-harmless unreferenced tenant row
+    // is strictly better than a user row pointing at a tenant that
+    // doesn't exist.
+    await this.docClient.send(
+      new PutCommand({
+        TableName: this.tableName,
+        Item: { ...keys.tenant(tenantId), entityType: 'Tenant', ...tenant },
+      }),
+    );
+
     try {
       await this.docClient.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Put: {
-                TableName: this.tableName,
-                Item: { ...keys.emailLock(input.email), entityType: 'EmailLock', userId },
-                ConditionExpression: 'attribute_not_exists(pk)',
-              },
-            },
-            {
-              Put: {
-                TableName: this.tableName,
-                Item: { ...keys.user(userId), entityType: 'User', ...user },
-              },
-            },
-            {
-              Put: {
-                TableName: this.tableName,
-                Item: { ...keys.tenant(tenantId), entityType: 'Tenant', ...tenant },
-              },
-            },
-          ],
+        new PutCommand({
+          TableName: this.tableName,
+          Item: { ...keys.user(userId), entityType: 'User', ...user },
+          ConditionExpression: 'attribute_not_exists(pk)',
         }),
       );
     } catch (error) {
-      if (error instanceof TransactionCanceledException) {
-        throw new ConflictError('Email already registered');
+      if (error instanceof ConditionalCheckFailedException) {
+        // Not the first sign-in for this Google account — read back the
+        // existing user (and their actual tenant, not the one we just
+        // speculatively created above).
+        const existing = await this.findById(userId);
+        if (existing) {
+          const existingTenant = await this.docClient.send(
+            new GetCommand({ TableName: this.tableName, Key: keys.tenant(existing.tenantId) }),
+          );
+          return { user: existing, tenant: stripInternalAttributes<Tenant>(existingTenant.Item!) };
+        }
       }
       throw error;
     }
@@ -98,34 +82,12 @@ export class DynamoUserRepository implements UserRepository {
     return { user, tenant };
   }
 
-  async updatePasswordHash(userId: string, passwordHash: string): Promise<void> {
-    await this.docClient.send(
-      new UpdateCommand({
-        TableName: this.tableName,
-        Key: keys.user(userId),
-        UpdateExpression: 'SET passwordHash = :passwordHash, updatedAt = :updatedAt',
-        ExpressionAttributeValues: {
-          ':passwordHash': passwordHash,
-          ':updatedAt': new Date().toISOString(),
-        },
-      }),
-    );
-  }
-
   async delete(userId: string, tenantId: string): Promise<void> {
-    const user = await this.findById(userId);
-
     await this.docClient.send(
       new DeleteCommand({ TableName: this.tableName, Key: keys.user(userId) }),
     );
     await this.docClient.send(
       new DeleteCommand({ TableName: this.tableName, Key: keys.tenant(tenantId) }),
     );
-
-    if (user) {
-      await this.docClient.send(
-        new DeleteCommand({ TableName: this.tableName, Key: keys.emailLock(user.email) }),
-      );
-    }
   }
 }

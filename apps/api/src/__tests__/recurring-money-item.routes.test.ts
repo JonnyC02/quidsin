@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import request, { type Agent } from 'supertest';
 import { buildTestApp } from './build-test-app.js';
+import type { FakeGoogleIdentityVerifier } from './fakes.js';
 
-async function registeredAgent(
+async function signedInAgent(
   app: Parameters<typeof request.agent>[0],
+  googleIdentityVerifier: FakeGoogleIdentityVerifier,
   email: string,
 ): Promise<Agent> {
+  const token = `tok-${email}`;
+  googleIdentityVerifier.seed(token, { sub: `g-${email}`, email, emailVerified: true });
   const agent = request.agent(app);
-  await agent.post('/auth/register').send({ email, password: 'secret123' });
+  await agent.post('/auth/google').send({ idToken: token });
   return agent;
 }
 
@@ -18,8 +22,8 @@ describe('/income routes', () => {
   });
 
   it('supports the full create/list/get/update/deactivate/delete lifecycle', async () => {
-    const { app } = buildTestApp();
-    const agent = await registeredAgent(app, 'jonny@example.com');
+    const { app, googleIdentityVerifier } = buildTestApp();
+    const agent = await signedInAgent(app, googleIdentityVerifier, 'jonny@example.com');
 
     const created = await agent.post('/income').send({
       name: 'Salary',
@@ -47,8 +51,8 @@ describe('/income routes', () => {
   });
 
   it('rejects invalid input', async () => {
-    const { app } = buildTestApp();
-    const agent = await registeredAgent(app, 'jonny@example.com');
+    const { app, googleIdentityVerifier } = buildTestApp();
+    const agent = await signedInAgent(app, googleIdentityVerifier, 'jonny@example.com');
 
     const response = await agent
       .post('/income')
@@ -57,9 +61,9 @@ describe('/income routes', () => {
   });
 
   it('isolates records between two different users/tenants', async () => {
-    const { app } = buildTestApp();
-    const agentA = await registeredAgent(app, 'a@example.com');
-    const agentB = await registeredAgent(app, 'b@example.com');
+    const { app, googleIdentityVerifier } = buildTestApp();
+    const agentA = await signedInAgent(app, googleIdentityVerifier, 'a@example.com');
+    const agentB = await signedInAgent(app, googleIdentityVerifier, 'b@example.com');
 
     const created = await agentA.post('/income').send({
       name: 'A-only',
@@ -76,8 +80,8 @@ describe('/income routes', () => {
 
 describe('/expenses routes (shares the same route factory as income)', () => {
   it('supports create and pause without deleting', async () => {
-    const { app } = buildTestApp();
-    const agent = await registeredAgent(app, 'jonny@example.com');
+    const { app, googleIdentityVerifier } = buildTestApp();
+    const agent = await signedInAgent(app, googleIdentityVerifier, 'jonny@example.com');
 
     const created = await agent.post('/expenses').send({
       name: 'Rent',

@@ -12,13 +12,8 @@ export interface Gsi1Key {
 
 export const keys = {
   user: (id: string): PrimaryKey => ({ pk: `USER#${id}`, sk: `USER#${id}` }),
-  emailLock: (email: string): PrimaryKey => ({ pk: `EMAIL#${email}`, sk: `EMAIL#${email}` }),
   tenant: (id: string): PrimaryKey => ({ pk: `TENANT#${id}`, sk: `TENANT#${id}` }),
   session: (id: string): PrimaryKey => ({ pk: `SESSION#${id}`, sk: `SESSION#${id}` }),
-  passwordResetToken: (tokenHash: string): PrimaryKey => ({
-    pk: `RESET#${tokenHash}`,
-    sk: `RESET#${tokenHash}`,
-  }),
   income: (tenantId: string, id: string): PrimaryKey => ({
     pk: `TENANT#${tenantId}`,
     sk: `INCOME#${id}`,
@@ -38,10 +33,6 @@ export const gsi1 = {
   sessionByUser: (userId: string, sessionId: string): Gsi1Key => ({
     gsi1pk: `USER#${userId}`,
     gsi1sk: `SESSION#${sessionId}`,
-  }),
-  resetTokenByUser: (userId: string, tokenId: string): Gsi1Key => ({
-    gsi1pk: `USER#${userId}`,
-    gsi1sk: `RESET#${tokenId}`,
   }),
   userPrefix: (userId: string): string => `USER#${userId}`,
 } as const;

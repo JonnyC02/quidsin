@@ -7,8 +7,7 @@ export const SESSION_QUERY_KEY = ['session'] as const;
 interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
-  login: (input: { email: string; password: string }) => Promise<void>;
-  register: (input: { email: string; password: string; name?: string }) => Promise<void>;
+  loginWithGoogle: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -23,13 +22,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
   });
 
-  const loginMutation = useMutation({
-    mutationFn: api.login,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY }),
-  });
-
-  const registerMutation = useMutation({
-    mutationFn: api.register,
+  const loginWithGoogleMutation = useMutation({
+    mutationFn: api.loginWithGoogle,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: SESSION_QUERY_KEY }),
   });
 
@@ -42,23 +36,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       isLoading: sessionQuery.isLoading,
       isAuthenticated: sessionQuery.isSuccess,
-      login: async (input) => {
-        await loginMutation.mutateAsync(input);
-      },
-      register: async (input) => {
-        await registerMutation.mutateAsync(input);
+      loginWithGoogle: async (idToken) => {
+        await loginWithGoogleMutation.mutateAsync(idToken);
       },
       logout: async () => {
         await logoutMutation.mutateAsync();
       },
     }),
-    [
-      sessionQuery.isLoading,
-      sessionQuery.isSuccess,
-      loginMutation,
-      registerMutation,
-      logoutMutation,
-    ],
+    [sessionQuery.isLoading, sessionQuery.isSuccess, loginWithGoogleMutation, logoutMutation],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

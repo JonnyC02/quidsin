@@ -9,3 +9,5 @@ coverage/
 .idea/
 *.tsbuildinfo
 .playwright-mcp/
+.aws-sam/
+samconfig.toml

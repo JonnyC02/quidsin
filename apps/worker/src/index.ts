@@ -1,17 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from '@quidsin/config';
-import {
-  createDocumentClient,
-  createDynamoDbClient,
-  DynamoAccountRepository,
-  DynamoDbJobQueue,
-  DynamoPlaidItemRepository,
-  DynamoTransactionRepository,
-  ensureTableExists,
-} from '@quidsin/database';
-import { AesGcmEncryptionService, SystemClock, TransactionSyncService } from '@quidsin/core';
-import { createPlaidClient, PlaidBankingProvider } from '@quidsin/banking';
+import { createDynamoDbClient, ensureTableExists } from '@quidsin/database';
 import { createApp } from './app.js';
+import { buildWorker } from './build-worker.js';
 
 const config = loadConfig();
 const workerId = randomUUID();
@@ -22,38 +13,10 @@ const dynamoClient = createDynamoDbClient({
   accessKeyId: config.AWS_ACCESS_KEY_ID,
   secretAccessKey: config.AWS_SECRET_ACCESS_KEY,
 });
-const docClient = createDocumentClient(dynamoClient);
-const tableName = config.DYNAMODB_TABLE_NAME;
 
-await ensureTableExists(dynamoClient, tableName);
+await ensureTableExists(dynamoClient, config.DYNAMODB_TABLE_NAME);
 
-const accountRepository = new DynamoAccountRepository(docClient, tableName);
-const plaidItemRepository = new DynamoPlaidItemRepository(docClient, tableName);
-const transactionRepository = new DynamoTransactionRepository(docClient, tableName);
-const jobQueue = new DynamoDbJobQueue(docClient, tableName);
-
-const clock = new SystemClock();
-const encryptionService = new AesGcmEncryptionService(Buffer.from(config.ENCRYPTION_KEY, 'base64'));
-const bankingProvider = new PlaidBankingProvider(
-  createPlaidClient({
-    clientId: config.PLAID_CLIENT_ID,
-    secret: config.PLAID_SECRET,
-    environment: config.PLAID_ENV,
-  }),
-  {
-    clientName: 'QuidsIn',
-    countryCodes: config.PLAID_COUNTRY_CODES.split(',').map((code) => code.trim()),
-  },
-);
-
-const transactionSyncService = new TransactionSyncService({
-  bankingProvider,
-  plaidItemRepository,
-  transactionRepository,
-  accountRepository,
-  encryptionService,
-  clock,
-});
+const { jobQueue, transactionSyncService } = buildWorker(config, { dynamoClient });
 
 let lastPolledAt = Date.now();
 // Healthy as long as the poll loop has completed an iteration within two

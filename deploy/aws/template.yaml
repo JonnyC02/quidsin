@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  QuidsIn — API (Lambda behind an HTTP API), worker (scheduled Lambda), the
+  application DynamoDB table, and S3+CloudFront for the web app. See
+  docs/deploying-to-aws.md for the full runbook — this template never
+  deploys itself; sam deploy and the 4 SSM parameters it depends on are
+  run by hand.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    Description: Deployment stage — used in resource naming and the SSM parameter paths below.
+  PlaidEnv:
+    Type: String
+    Default: sandbox
+    AllowedValues: [sandbox, production]
+  PlaidCountryCodes:
+    Type: String
+    Default: GB
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 30
+
+Resources:
+  # --- Data ----------------------------------------------------------------
+
+  AppTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub quidsin-${Stage}
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: gsi1pk
+          AttributeType: S
+        - AttributeName: gsi1sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: gsi1pk
+              KeyType: HASH
+            - AttributeName: gsi1sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # --- API -------------------------------------------------------------
+
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      # No API-Gateway-level CORS — Express's own cors() middleware
+      # already handles it; configuring both risks duplicate/conflicting
+      # headers.
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../apps/api/src
+      Handler: lambda.handler
+      Timeout: 30
+      Environment:
+        Variables:
+          NODE_ENV: production
+          # Required by the shared config schema but never actually read
+          # by the Lambda entrypoint (it constructs its own DynamoDB
+          # client directly) — see docs/deploying-to-aws.md.
+          DYNAMODB_ENDPOINT: !Sub https://dynamodb.${AWS::Region}.amazonaws.com
+          DYNAMODB_REGION: !Ref AWS::Region
+          DYNAMODB_TABLE_NAME: !Ref AppTable
+          WEB_ORIGIN: !Sub https://${WebDistribution.DomainName}
+          SESSION_COOKIE_SECURE: 'true'
+          PLAID_ENV: !Ref PlaidEnv
+          PLAID_COUNTRY_CODES: !Ref PlaidCountryCodes
+          GOOGLE_CLIENT_ID_PARAM: !Sub /quidsin/${Stage}/google-client-id
+          PLAID_CLIENT_ID_PARAM: !Sub /quidsin/${Stage}/plaid-client-id
+          PLAID_SECRET_PARAM: !Sub /quidsin/${Stage}/plaid-secret
+          ENCRYPTION_KEY_PARAM: !Sub /quidsin/${Stage}/encryption-key
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/quidsin/${Stage}/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm
+      Events:
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /
+            Method: ANY
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: node22
+        Sourcemap: false
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+          - lambda.ts
+
+  # --- Worker ------------------------------------------------------------
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../apps/worker/src
+      Handler: lambda.handler
+      Timeout: 55
+      Environment:
+        Variables:
+          NODE_ENV: production
+          DYNAMODB_ENDPOINT: !Sub https://dynamodb.${AWS::Region}.amazonaws.com
+          DYNAMODB_REGION: !Ref AWS::Region
+          DYNAMODB_TABLE_NAME: !Ref AppTable
+          # loadConfig's schema requires this unconditionally even though
+          # the worker never uses it — same gap already present (and
+          # already worked around) in docker-compose.yml.
+          GOOGLE_CLIENT_ID: unused-by-worker
+          PLAID_ENV: !Ref PlaidEnv
+          PLAID_COUNTRY_CODES: !Ref PlaidCountryCodes
+          QUEUE_LEASE_DURATION_MS: '60000'
+          PLAID_CLIENT_ID_PARAM: !Sub /quidsin/${Stage}/plaid-client-id
+          PLAID_SECRET_PARAM: !Sub /quidsin/${Stage}/plaid-secret
+          ENCRYPTION_KEY_PARAM: !Sub /quidsin/${Stage}/encryption-key
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AppTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/quidsin/${Stage}/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/ssm
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(1 minute)
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: node22
+        Sourcemap: false
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        EntryPoints:
+          - lambda.ts
+
+  # --- Web (S3 + CloudFront) ---------------------------------------------
+
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub quidsin-${Stage}-web-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        Origins:
+          - Id: WebBucketOrigin
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref WebOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+        DefaultCacheBehavior:
+          TargetOriginId: WebBucketOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # AWS Managed-CachingOptimized
+        # A SPA's client-side routes 404 at the S3 origin — rewrite to
+        # index.html (200, not a redirect) so the app's own router handles it.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${WebBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the deployed API — set as VITE_API_BASE_URL when building the web app.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  WebUrl:
+    Description: CloudFront URL the web app is served from.
+    Value: !Sub https://${WebDistribution.DomainName}
+  WebBucketName:
+    Value: !Ref WebBucket
+  WebDistributionId:
+    Value: !Ref WebDistribution
+  TableName:
+    Value: !Ref AppTable

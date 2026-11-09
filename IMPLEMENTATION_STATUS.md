@@ -2,11 +2,10 @@
 
 ## Current phase
 
-**Phase 4 — Tenant Membership, Visibility Enforcement, Roles & Audit
-Events: complete.** Authentication was replaced with Google Sign-In
-between Phase 2 and Phase 3 (see "Authentication replaced with Google
-Sign-In" below) — this superseded Phase 2's original password-based auth
-before Phase 3 began.
+**Phase 5 — AWS SAM Deployment: complete.** Authentication was replaced
+with Google Sign-In between Phase 2 and Phase 3 (see "Authentication
+replaced with Google Sign-In" below) — this superseded Phase 2's
+original password-based auth before Phase 3 began.
 
 ## Completed functionality
 
@@ -180,6 +179,61 @@ visibility, leaving, deleting an account once solo again) is the one
 piece left for the user to run themselves — see
 `docs/getting-started.md` ("Inviting someone to your tenant").
 
+### Phase 5 — AWS SAM Deployment
+
+- **API on Lambda behind an HTTP API**: `apps/api/src/build-server.ts`
+  extracts the entire dependency-injection graph (every repository and
+  service) out of `src/index.ts` into `buildApiApp(config, { database,
+  dynamoClient })`, so both the self-hosted entrypoint (`src/index.ts`,
+  unchanged behavior) and the new Lambda entrypoint (`src/lambda.ts`)
+  share it — the only things that differ between them are the
+  already-constructed DynamoDB client and health-check adapter.
+  `src/lambda.ts` wraps the resulting Express app with
+  `@codegenie/serverless-express`.
+- **Worker on a scheduled Lambda, not a long-running container**: same
+  `build-worker.ts` extraction pattern. `apps/worker/src/lambda.ts` is
+  invoked every minute by an EventBridge schedule and drains the queue
+  (claims and processes jobs) in a bounded loop that self-limits via
+  `context.getRemainingTimeInMillis()`, rather than running the
+  self-hosted entrypoint's infinite poll loop. Overlapping invocations
+  are harmless — `DynamoDbJobQueue`'s conditional claim (built in Phase 3
+  specifically for this) already makes concurrent claims safe.
+- **Secrets fetched at runtime from SSM Parameter Store, never baked into
+  the template**: `packages/config`'s new `loadConfigFromSsm` fetches and
+  KMS-decrypts `GOOGLE_CLIENT_ID`/`PLAID_CLIENT_ID`/`PLAID_SECRET`/
+  `ENCRYPTION_KEY` from SecureString parameters at Lambda cold start
+  (cached at module scope for the life of the execution environment) —
+  deliberately not via CloudFormation's `{{resolve:ssm-secure:...}}`
+  dynamic references, which resolve to the literal value at deploy time
+  and still end up as a plaintext Lambda environment variable.
+- **`DynamoDbAwsAdapter`** (`packages/database`) is no longer a stub —
+  `ping()` mirrors `DynamoDbLocalAdapter`'s exactly, just without an
+  explicit endpoint/credentials override, since inside Lambda the SDK
+  resolves both from the execution role automatically.
+- **`deploy/aws/template.yaml`** (new SAM template): the DynamoDB table
+  as a CloudFormation resource (mirroring `table/bootstrap.ts`'s schema
+  exactly — `ensureTableExists` is never called on this path, same as
+  the code comment already said it shouldn't be), the API and worker
+  Lambdas (esbuild-bundled, ESM output — CJS doesn't support the
+  top-level `await` both entrypoints use), and S3+CloudFront for the web
+  app (private bucket, Origin Access Control, 403/404 → `/index.html` so
+  client-side routing works).
+- **`deploy/aws/deploy-web.sh`** (new): builds the web app against the
+  deployed API's URL and syncs it to S3 + invalidates CloudFront — a
+  script, not a pipeline (CI/CD is Phase 6).
+
+Verified without needing a real AWS account: the new `loadConfigFromSsm`
+unit test (an injected fake SSM fetch, no real AWS or LocalStack), full
+typecheck/lint/test/build across every affected package, `sam validate
+--lint` on the template, and — the strongest credential-free proof
+available — `sam build`, which actually ran the esbuild bundling for
+both Lambda entrypoints locally and succeeded (confirming the
+`BuildMethod`/`CodeUri`/`Handler`/`Format` wiring is correct, not just
+that the YAML parses). `sam deploy` itself, creating the SSM parameters,
+and running `deploy-web.sh` against a real stack are the parts that need
+the user's own AWS account and are left for them — see
+`docs/deploying-to-aws.md`.
+
 ## Authentication replaced with Google Sign-In
 
 Shortly after Phase 2 shipped, authentication was replaced entirely —
@@ -227,9 +281,6 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 5** — AWS SAM deployment (`deploy/aws/` doesn't exist yet;
-  `DynamoDbAwsAdapter` is a stub; `ensureTableExists` is a dev/self-hosted
-  convenience, not a production provisioning mechanism).
 - **Phase 6** — public CI/CD and demo environment.
 - **Phase 7** — private hosted edition (separate repository).
 - **Phase 8** — cross-repository automation.
@@ -347,6 +398,35 @@ choice made after that trade-off was explained, not an oversight.
   that a core type change's blast radius is usually smaller than the
   raw error count suggests once you find where the literals actually
   live.
+
+### Phase 5
+
+- **SAM's esbuild `BuildMethod` defaults to CJS output, which doesn't
+  support top-level `await`** — and both `src/lambda.ts` entrypoints use
+  it (`loadConfigFromSsm` is async). `sam build` failed with `Top-level
+  await is currently not supported with the "cjs" output format` until
+  `BuildProperties.Format: esm` plus `OutExtension: ['.js=.mjs']` was
+  added (the `.mjs` extension forces Node to load the bundle as ESM
+  regardless of any nearby `package.json`, which the build output
+  doesn't carry one of anyway).
+- **`BuildProperties.OutExtension`'s actual expected shape isn't a
+  mapping or a list of `{Key, Value}` objects — it's a list of literal
+  `"<ext>=<replacement>"` strings** (`aws-lambda-builders` passes each
+  list item straight through as `--out-extension:<item>` to the esbuild
+  CLI). Both of the more YAML-idiomatic-looking forms fail — one with an
+  opaque "failed to determine the type of the configuration" error, the
+  other by literally stringifying a Python dict into the esbuild
+  argument. Found by iterating against a real local `sam build`, not by
+  reading the metadata schema — this specific property's shape doesn't
+  match the pattern every other key-value SAM metadata property uses.
+- **`esbuild` must be resolvable on `PATH`, not just present somewhere
+  in `node_modules`** — `aws-lambda-builders`' Node/esbuild integration
+  doesn't walk nested `node_modules` looking for it (it was already
+  present transitively via `tsx`, which didn't help). Fixed by adding it
+  as an explicit root devDependency and documenting that it needs to be
+  put on `PATH` before running `sam build`.
+
+## Architectural decisions
 
 See the approved plans for full rationale; summarized:
 
@@ -474,3 +554,42 @@ existing code already implied a clear, defensible default:
   conservative reading of "private" — a visible total that was secretly
   inflated by a hidden number would leak information through the total
   itself.
+
+### Phase 5
+
+Four design questions were resolved with the user up front; summarized
+here, full rationale in the approved plan:
+
+1. **Worker → scheduled Lambda (EventBridge, every 1 minute), not
+   Fargate.** Keeps the entire deployment on one compute model (Lambda)
+   instead of mixing in a second one just for the worker. The queue's
+   existing conditional-claim logic (Phase 3) already tolerates
+   overlapping invocations, so nothing new was needed to make this safe.
+2. **Secrets via SSM Parameter Store (SecureString), fetched by the app
+   at runtime.** The alternative — CloudFormation's
+   `{{resolve:ssm-secure:...}}` dynamic references — resolves to the
+   literal value at deploy time and still lands in the Lambda console as
+   plaintext, which would have made the SecureString choice pointless.
+3. **Web app on S3 + CloudFront, inside the same stack/account.** No
+   second hosting provider or account to manage; one `sam deploy`
+   provisions everything.
+4. **No custom domain yet.** Default API Gateway/CloudFront endpoints
+   keep the first deployment simpler; a domain is layerable later
+   without restructuring anything built here.
+
+Two further choices made without needing a question:
+
+- **`samconfig.toml` is gitignored, not committed.** `sam deploy
+  --guided` writes a specific stack name/region/account's choices into
+  it — exactly the kind of thing a public repo shouldn't carry on behalf
+  of whoever deploys their own copy. The runbook documents the
+  `--guided` flow instead of shipping a template file for it.
+- **`buildApiApp`/`buildWorker` take an already-constructed DynamoDB
+  client and (for the API) health-check adapter, rather than building
+  everything from raw config.** Those are the only two things that
+  differ between the self-hosted and Lambda entrypoints — the self-hosted
+  one also needs to call `ensureTableExists` first, which only makes
+  sense with its own already-constructed client in hand. Passing the
+  client in, instead of config flags controlling internal branching, kept
+  the shared function from needing to know which environment it's in at
+  all.

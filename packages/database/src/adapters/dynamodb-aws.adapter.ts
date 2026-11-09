@@ -1,3 +1,4 @@
+import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import type { HealthCheckable } from '../ports/health-checkable.js';
 
 export interface DynamoDbAwsAdapterOptions {
@@ -5,13 +6,19 @@ export interface DynamoDbAwsAdapterOptions {
 }
 
 /**
- * Stub seam for the real AWS-managed DynamoDB adapter, implemented when
- * the SAM/Lambda deployment phase actually targets AWS.
+ * The managed-AWS counterpart to DynamoDbLocalAdapter. No explicit
+ * endpoint or credentials — inside Lambda, the SDK resolves both from the
+ * execution role automatically.
  */
 export class DynamoDbAwsAdapter implements HealthCheckable {
-  constructor(private readonly options: DynamoDbAwsAdapterOptions) {}
+  private readonly client: DynamoDBClient;
+
+  constructor(options: DynamoDbAwsAdapterOptions) {
+    this.client = new DynamoDBClient({ region: options.region });
+  }
 
   async ping(): Promise<boolean> {
-    throw new Error(`Not implemented (region: ${this.options.region})`);
+    await this.client.send(new ListTablesCommand({}));
+    return true;
   }
 }

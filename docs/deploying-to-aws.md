@@ -130,7 +130,10 @@ Everything here is pay-per-use: DynamoDB `PAY_PER_REQUEST`, Lambda's
 free tier (1M requests/month), S3, and CloudFront's free tier. At low
 personal-use traffic this should run at or near $0/month; the worker's
 1-minute schedule is its main fixed cost (~43,800 invocations/month,
-still well inside Lambda's free tier on its own).
+still well inside Lambda's free tier on its own). Point-in-time recovery
+on the table adds a small continuous-backup cost (roughly proportional
+to table size) in exchange for being able to restore to any point in
+the last 35 days — worth it for anyone's real financial data.
 
 ## Tearing down
 

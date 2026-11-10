@@ -358,11 +358,12 @@ choice made after that trade-off was explained, not an oversight.
 
 ## Outstanding work (future phases, not started)
 
-- **Phase 7 (Part B)** — the private `quidsin-hosted` repo itself:
-  billing data model, Stripe checkout/portal/webhook, the minimal admin
-  app, and a deployment for all of it. Part A (this repo's
-  `EntitlementChecker` hook) is complete; see above.
-- **Phase 8** — cross-repository automation.
+- **Phase 7 (Part B)** and **Phase 8** are complete, in the private
+  `quidsin-hosted` repo (not here, by design — Part A's
+  `EntitlementChecker` hook above is the only trace of billing/admin/
+  hosting concerns this public repo ever carries). That repo vendors
+  this one as a reviewed git submodule; see its own
+  `IMPLEMENTATION_STATUS.md`-equivalent docs for what's built on top.
 
 ## Known issues / things discovered during implementation
 
